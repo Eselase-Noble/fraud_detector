@@ -1,0 +1,12 @@
+Velocity fraud is characterized by:
+
+- Rapid sequence of transactions on the same card or account
+- Increasing transaction amounts over short time intervals
+- Multiple merchants or categories in a short time window
+- Multiple attempts with declined transactions
+- Sudden changes in spending patterns
+
+Industry Notes:
+- Banks enforce throttling rules to prevent high-risk velocity transactions
+- Combining velocity with location and device data increases detection accuracy
+- Real-time scoring engines flag accounts exceeding normal transaction thresholds

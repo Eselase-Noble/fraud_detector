@@ -1,0 +1,9 @@
+Merchant risk patterns:
+- Merchants with high historical chargebacks
+- New or recently registered merchants
+- High-risk industries: Gaming, Adult, Gambling, Jewelry
+- Merchants in unusual locations compared to user
+- Unusual MCC codes
+
+Industry Notes:
+- Merchant scoring is part of payment processor risk evaluation

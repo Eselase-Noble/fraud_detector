@@ -1,0 +1,5 @@
+Capital One 2019 Breach:
+- 100M accounts exposed via cloud misconfiguration
+- Hackers accessed sensitive customer info
+- Key lessons: monitor cloud access, enforce MFA, audit permissions
+- Fraud signals: unusual API activity, abnormal transaction patterns

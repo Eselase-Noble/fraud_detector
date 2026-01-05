@@ -1,0 +1,5 @@
+Consumer Fraud Advisories:
+- Avoid sharing card details online
+- Monitor monthly statements for anomalies
+- Use alerts for foreign or online transactions
+- Keep devices secured with multi-factor authentication

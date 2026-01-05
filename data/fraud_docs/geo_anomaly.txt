@@ -1,0 +1,14 @@
+Geographical anomalies include:
+
+- Transactions occurring far from the user's usual location
+- Impossible travel scenarios
+- Transactions from countries with high fraud incidence compared to user history
+- Transactions at unusual times of day compared to typical user behavior
+- Mismatched IP and billing location
+- Use of VPNs or proxies to mask location
+- High-risk foreign countries flagged by international fraud reports
+
+Industry Notes:
+- Banks use GeoIP and device fingerprinting to detect these anomalies
+- Rapid location switches are a key indicator of account compromise
+- Cross-referencing with historical patterns improves accuracy

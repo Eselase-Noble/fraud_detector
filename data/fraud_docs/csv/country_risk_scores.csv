@@ -1,0 +1,8 @@
+country_code,country_name,risk_level
+US,United States,low
+NG,Nigeria,high
+RU,Russia,high
+GB,United Kingdom,medium
+IN,India,medium
+CN,China,medium
+BR,Brazil,high

@@ -1,0 +1,11 @@
+Merchant-related fraud risks:
+
+- Merchants with high historical chargebacks
+- New or recently registered merchants
+- Merchants in high-risk industries: gaming, gambling, adult content
+- Merchants with unusual merchant category codes (MCC)
+- Unusual merchant locations compared to the user's historical pattern
+
+Industry Notes:
+- Payment processors maintain merchant risk databases
+- Transaction scoring often includes merchant category weighting

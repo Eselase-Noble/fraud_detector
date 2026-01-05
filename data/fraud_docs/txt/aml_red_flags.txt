@@ -1,0 +1,11 @@
+AML Red Flags:
+- Transactions just below reporting thresholds
+- Rapid transfers to multiple accounts
+- Frequent international wire transfers
+- Inconsistent identification or KYC info
+- Structured transactions to avoid detection
+- Multi-currency rapid transfers
+
+Industry Notes:
+- Suspicious transactions reported to authorities (SARs)
+- Combining historical data and regulatory alerts improves detection

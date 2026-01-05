@@ -1,0 +1,6 @@
+transaction_type,threshold_usd
+wire_transfer,10000
+cash_deposit,10000
+international_transfer,5000
+online_payment,2000
+crypto_transfer,1000

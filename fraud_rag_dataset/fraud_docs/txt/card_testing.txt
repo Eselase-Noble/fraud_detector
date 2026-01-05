@@ -1,0 +1,9 @@
+Card testing patterns:
+- Multiple small-value transactions to verify validity
+- Fast sequence of transactions in a short time window
+- Transactions across different merchant categories
+- Often associated with stolen or leaked card data
+
+Industry Notes:
+- Detecting testing quickly prevents larger fraud losses
+- Usually combined with velocity rules

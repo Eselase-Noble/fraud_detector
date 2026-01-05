@@ -1,0 +1,10 @@
+Velocity fraud patterns:
+- Rapid sequence of transactions on the same card/account
+- Increasing transaction amounts in short intervals
+- Multiple merchants or categories in a short window
+- Multiple declined attempts followed by retries
+- Sudden changes in spending patterns
+
+Industry Notes:
+- Velocity monitoring is critical for online banking
+- Real-time scoring engines flag accounts exceeding thresholds

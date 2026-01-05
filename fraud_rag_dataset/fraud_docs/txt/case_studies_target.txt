@@ -1,0 +1,10 @@
+Target 2013 Data Breach:
+- Hackers stole 40M credit and debit card accounts
+- Malware installed via vendor credentials
+- Attack detected via unusual transaction patterns
+- Lessons: monitor third-party access, POS security, anomaly detection
+
+Signals:
+- Unexpected spikes in POS activity
+- Geographic anomalies in transactions
+- Rapid transaction velocity

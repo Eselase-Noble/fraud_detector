@@ -1,0 +1,26 @@
+[
+  {
+    "country": "NG",
+    "risk_level": "high"
+  },
+  {
+    "country": "RU",
+    "risk_level": "high"
+  },
+  {
+    "country": "US",
+    "risk_level": "low"
+  },
+  {
+    "country": "IN",
+    "risk_level": "medium"
+  },
+  {
+    "country": "GB",
+    "risk_level": "medium"
+  },
+  {
+    "country": "BR",
+    "risk_level": "high"
+  }
+]

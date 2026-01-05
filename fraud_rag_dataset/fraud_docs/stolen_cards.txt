@@ -1,0 +1,13 @@
+Stolen card fraud patterns:
+
+- Card numbers reported stolen or leaked online
+- Unauthorized use at multiple merchants within a short period
+- Transactions inconsistent with cardholder behavior
+- Purchases at high-risk merchants or unusual countries
+- Small transactions followed by high-value transactions (testing)
+- Transactions immediately after reported card loss or theft
+
+Industry Notes:
+- Real-time card monitoring systems flag unusual patterns
+- EMV chip transactions reduce counterfeit risk but online remains high
+- Velocity and geography rules often detect stolen card activity

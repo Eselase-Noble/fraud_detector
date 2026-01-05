@@ -1,0 +1,9 @@
+Stolen card fraud:
+- Card numbers reported stolen or leaked online
+- Unauthorized use at multiple merchants quickly
+- Purchases inconsistent with cardholder behavior
+- Small transactions followed by high-value transactions (testing)
+- Transactions immediately after card loss report
+
+Industry Notes:
+- Real-time monitoring and velocity + geo analysis detect stolen card activity

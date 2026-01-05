@@ -1,0 +1,8 @@
+merchant_id,merchant_name,merchant_category,risk_level
+merch_001,Online Gaming Co,Gaming,high
+merch_002,XYZ Electronics,Retail,medium
+merch_003,Exotic Jewelry,Jewelry,high
+merch_004,Local Grocery,Retail,low
+merch_005,TravelHub,Travel,medium
+merch_006,AdultWorld,Adult,high
+merch_007,QuickLoans,Finance,high

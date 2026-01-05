@@ -1,0 +1,38 @@
+[
+  {
+    "transaction_id": "txn_0001",
+    "user_id": "user_001",
+    "amount": 150.5,
+    "currency": "USD",
+    "merchant": "merch_001",
+    "location": "US",
+    "timestamp": "2025-01-01T10:30:00"
+  },
+  {
+    "transaction_id": "txn_0002",
+    "user_id": "user_002",
+    "amount": 2500.0,
+    "currency": "USD",
+    "merchant": "merch_002",
+    "location": "NG",
+    "timestamp": "2025-01-01T11:00:00"
+  },
+  {
+    "transaction_id": "txn_0003",
+    "user_id": "user_003",
+    "amount": 15.75,
+    "currency": "USD",
+    "merchant": "merch_004",
+    "location": "GB",
+    "timestamp": "2025-01-01T12:00:00"
+  },
+  {
+    "transaction_id": "txn_0004",
+    "user_id": "user_001",
+    "amount": 5000.0,
+    "currency": "USD",
+    "merchant": "merch_003",
+    "location": "NG",
+    "timestamp": "2025-01-01T12:30:00"
+  }
+]

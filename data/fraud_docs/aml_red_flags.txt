@@ -1,0 +1,13 @@
+Anti-Money Laundering (AML) red flags:
+
+- Transactions just below reporting thresholds
+- Rapid transfers to multiple accounts
+- Frequent international wire transfers
+- Inconsistent identification or KYC info
+- Structured transactions intended to avoid detection
+- Use of multiple currencies in a short period
+
+Industry Notes:
+- AML rules are mandatory in financial institutions
+- Combining historical data and regulatory alerts improves detection
+- Suspicious transactions are reported to authorities (SARs)
