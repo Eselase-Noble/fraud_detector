@@ -1,3 +1,4 @@
+import io
 import os
 
 import asyncpg
@@ -80,3 +81,82 @@ async def load_csv_transactions(csv_file: str = "data/fraud_docs/csv/transaction
 
     await conn.close()
     print(f"CSV {csv_file} loaded into the database successfully.")
+
+
+async def save_csv_to_db(filename: str, content: bytes):
+    # Convert bytes to text and CSV reader
+    csv_text = content.decode("utf-8")
+    csv_file = io.StringIO(csv_text)
+    reader = csv.DictReader(csv_file)
+
+    conn = await asyncpg.connect(DB_URL)
+
+    try:
+        for row in reader:
+            await conn.execute(
+                """
+                INSERT INTO transactions (
+                    transaction_id,
+                    user_id,
+                    amount,
+                    currency,
+                    merchant,
+                    location,
+                    timestamp
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (transaction_id) DO NOTHING
+                """,
+                row["transaction_id"],
+                row["user_id"],
+                float(row["amount"]),
+                row["currency"],
+                row.get("merchant"),
+                row.get("location"),
+                row["timestamp"],
+            )
+    finally:
+        await conn.close()
+
+    print(f"{filename}: CSV data inserted successfully")
+
+async def save_bulk_csv_to_db(filename: str, content: bytes):
+    csv_text = content.decode("utf-8")
+    csv_file = io.StringIO(csv_text)
+    reader = csv.DictReader(csv_file)
+
+    records = [
+        (
+            row["transaction_id"],
+            row["user_id"],
+            float(row["amount"]),
+            row["currency"],
+            row.get("merchant"),
+            row.get("location"),
+            row["timestamp"],
+        )
+        for row in reader
+    ]
+
+    conn = await asyncpg.connect(DB_URL)
+    try:
+        await conn.executemany(
+            """
+            INSERT INTO transactions (
+                transaction_id,
+                user_id,
+                amount,
+                currency,
+                merchant,
+                location,
+                timestamp
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (transaction_id) DO NOTHING
+            """,
+            records
+        )
+    finally:
+        await conn.close()
+
+    print(f"{filename}: {len(records)} rows inserted successfully")
