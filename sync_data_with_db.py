@@ -2,9 +2,9 @@ import psycopg2
 import csv
 
 # PostgreSQL connection parameters
-DB_NAME = "fraud_database"
+DB_NAME = "db"
 DB_USER = "postgres"
-DB_PASS = "postgres"
+DB_PASS = "password"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
