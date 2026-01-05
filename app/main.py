@@ -1,8 +1,24 @@
 
 from fastapi import FastAPI
 from app.routers import transactions, users, docs, analytics, admin
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Fraud Detection Service", version="1.0")
+
+
+
+# ✅ CORS CONFIGURATION
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vue (Vite)
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],             # GET, POST, PUT, DELETE, OPTIONS
+    allow_headers=["*"],             # Authorization, Content-Type, etc
+)
+
 
 # Include routers
 app.include_router(transactions.router, prefix="/transactions", tags=["Transactions"])
