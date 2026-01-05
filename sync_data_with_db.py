@@ -8,7 +8,7 @@ DB_PASS = "password"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
-csv_file = "data/fraud_docs/csv/transactions_10000.csv"
+csv_file = "transactions_10000.csv"
 
 # Connect to PostgreSQL
 conn = psycopg2.connect(

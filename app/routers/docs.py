@@ -37,7 +37,7 @@ async def update_vector_store():
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     return {"status": "Vector store updated"}
 
-@router.post("/save_bulk")
+@router.post("/admin/upload_docs")
 async def updateKnowledgeBase(file: UploadFile):
     # Get file extension safely
     _, ext = os.path.splitext(file.filename.lower())
@@ -65,8 +65,8 @@ async def updateKnowledgeBase(file: UploadFile):
         await file.close()
 
     # Optional: save metadata or content to DB
-    if ext == ".csv":
-        await save_csv_to_db(file.filename, content)
+    # if ext == ".csv":
+    #     await save_csv_to_db(file.filename, content)
 
     return {
         "status": "success",

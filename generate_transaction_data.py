@@ -51,7 +51,7 @@ for txn_id in range(1, NUM_TRANSACTIONS + 1):
 # -----------------------------
 # Save to CSV
 # -----------------------------
-csv_file = "data/fraud_docs/csv/transactions_10000.csv"
+csv_file = "transactions_10000.csv"
 with open(csv_file, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=transactions[0].keys())
     writer.writeheader()

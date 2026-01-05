@@ -1,0 +1,217 @@
+ ============================================================
+BREAKHIS GPCN-ViT Training Pipeline
+============================================================
+
+Step 1: Testing model architecture...
+
+Testing model with sample input...
+Input shape: torch.Size([2, 3, 224, 224])
+Output shape: torch.Size([2, 2])
+Output values:
+tensor([[-0.1879,  0.2205],
+        [-0.1076,  0.4043]])
+✓ Model forward pass successful!
+
+Step 2: Dataset path: /content/drive/MyDrive/MY RESEARCH/GPCN-ViT Breast Cancer Diagnosis/BreakHisDataset/breakhis/BreaKHis_v1/BreaKHis_v1
+✓ Dataset found!
+
+Step 3: Starting training...
+Creating dataloaders...
+Loaded 1596 images
+Class distribution: 1096 malignant, 500 benign
+Loaded 399 images
+Class distribution: 274 malignant, 125 benign
+
+Dataset Info:
+  Number of classes: 2
+  Training samples: 1596
+  Validation samples: 399
+
+Initializing model...
+model.safetensors: 100% 346M/346M [00:02<00:00, 270MB/s]
+Model Architecture:
+  Embedding dimension: 768
+  GPCN neighbors (k): 8
+  Total parameters: 87,960,675
+  Trainable parameters: 87,960,675
+
+Testing model with sample batch...
+  Sample batch images shape: torch.Size([16, 3, 224, 224])
+  Sample batch labels shape: torch.Size([16])
+  Model output shape: torch.Size([2, 2])
+  ✓ Model test successful!
+
+Using device: cuda
+
+==================================================
+Starting Training
+==================================================
+
+Epoch 1/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.8815 | Acc: 18.75%
+  Batch 10/100 | Loss: 0.7318 | Acc: 67.05%
+  Batch 20/100 | Loss: 0.6803 | Acc: 69.35%
+  Batch 30/100 | Loss: 0.4527 | Acc: 72.18%
+  Batch 40/100 | Loss: 0.7641 | Acc: 74.85%
+  Batch 50/100 | Loss: 0.4339 | Acc: 75.98%
+  Batch 60/100 | Loss: 0.4074 | Acc: 77.05%
+  Batch 70/100 | Loss: 0.2944 | Acc: 77.99%
+  Batch 80/100 | Loss: 0.3763 | Acc: 78.70%
+  Batch 90/100 | Loss: 0.5092 | Acc: 79.05%
+Train | Loss: 0.4765 | Acc: 79.39%
+Val   | Loss: 0.4216 | Acc: 82.96%
+  Saved best model with val acc: 82.96%
+
+Epoch 2/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.4259 | Acc: 81.25%
+  Batch 10/100 | Loss: 0.5100 | Acc: 85.80%
+  Batch 20/100 | Loss: 0.2729 | Acc: 84.82%
+  Batch 30/100 | Loss: 0.2845 | Acc: 85.89%
+  Batch 40/100 | Loss: 0.4703 | Acc: 85.06%
+  Batch 50/100 | Loss: 0.3916 | Acc: 84.56%
+  Batch 60/100 | Loss: 0.2087 | Acc: 84.94%
+  Batch 70/100 | Loss: 0.3312 | Acc: 85.12%
+  Batch 80/100 | Loss: 0.5010 | Acc: 85.34%
+  Batch 90/100 | Loss: 0.5294 | Acc: 85.51%
+Train | Loss: 0.3904 | Acc: 85.90%
+Val   | Loss: 0.4285 | Acc: 82.96%
+
+Epoch 3/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.4407 | Acc: 87.50%
+  Batch 10/100 | Loss: 0.2859 | Acc: 87.50%
+  Batch 20/100 | Loss: 0.5353 | Acc: 86.01%
+  Batch 30/100 | Loss: 0.1755 | Acc: 85.89%
+  Batch 40/100 | Loss: 0.3962 | Acc: 85.67%
+  Batch 50/100 | Loss: 0.3052 | Acc: 85.78%
+  Batch 60/100 | Loss: 0.2952 | Acc: 86.48%
+  Batch 70/100 | Loss: 0.5289 | Acc: 86.00%
+  Batch 80/100 | Loss: 0.1258 | Acc: 86.50%
+  Batch 90/100 | Loss: 0.6558 | Acc: 86.06%
+Train | Loss: 0.3661 | Acc: 86.28%
+Val   | Loss: 0.3743 | Acc: 85.21%
+  Saved best model with val acc: 85.21%
+
+Epoch 4/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.6227 | Acc: 75.00%
+  Batch 10/100 | Loss: 0.1951 | Acc: 90.34%
+  Batch 20/100 | Loss: 0.7553 | Acc: 86.90%
+  Batch 30/100 | Loss: 0.3620 | Acc: 84.68%
+  Batch 40/100 | Loss: 0.4923 | Acc: 83.08%
+  Batch 50/100 | Loss: 0.2515 | Acc: 84.07%
+  Batch 60/100 | Loss: 0.4057 | Acc: 84.84%
+  Batch 70/100 | Loss: 0.3133 | Acc: 85.48%
+  Batch 80/100 | Loss: 0.2288 | Acc: 85.73%
+  Batch 90/100 | Loss: 0.4149 | Acc: 84.96%
+Train | Loss: 0.3542 | Acc: 85.34%
+Val   | Loss: 0.3450 | Acc: 86.47%
+  Saved best model with val acc: 86.47%
+
+Epoch 5/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.8070 | Acc: 62.50%
+  Batch 10/100 | Loss: 0.2690 | Acc: 87.50%
+  Batch 20/100 | Loss: 0.2943 | Acc: 87.80%
+  Batch 30/100 | Loss: 0.2979 | Acc: 88.10%
+  Batch 40/100 | Loss: 0.1237 | Acc: 88.57%
+  Batch 50/100 | Loss: 0.4178 | Acc: 88.48%
+  Batch 60/100 | Loss: 0.4494 | Acc: 88.42%
+  Batch 70/100 | Loss: 0.2068 | Acc: 88.56%
+  Batch 80/100 | Loss: 0.2056 | Acc: 88.81%
+  Batch 90/100 | Loss: 0.1539 | Acc: 88.94%
+Train | Loss: 0.2973 | Acc: 88.66%
+Val   | Loss: 0.3251 | Acc: 87.22%
+  Saved best model with val acc: 87.22%
+
+Epoch 6/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.1374 | Acc: 100.00%
+  Batch 10/100 | Loss: 0.2891 | Acc: 91.48%
+  Batch 20/100 | Loss: 0.3987 | Acc: 89.58%
+  Batch 30/100 | Loss: 0.2623 | Acc: 90.32%
+  Batch 40/100 | Loss: 0.3128 | Acc: 88.72%
+  Batch 50/100 | Loss: 0.1629 | Acc: 88.73%
+  Batch 60/100 | Loss: 0.0483 | Acc: 89.04%
+  Batch 70/100 | Loss: 0.2435 | Acc: 88.47%
+  Batch 80/100 | Loss: 0.2641 | Acc: 88.12%
+  Batch 90/100 | Loss: 0.2194 | Acc: 88.26%
+Train | Loss: 0.2970 | Acc: 88.53%
+Val   | Loss: 0.4557 | Acc: 79.95%
+
+Epoch 7/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.2612 | Acc: 87.50%
+  Batch 10/100 | Loss: 0.1800 | Acc: 91.48%
+  Batch 20/100 | Loss: 0.3811 | Acc: 91.07%
+  Batch 30/100 | Loss: 0.3349 | Acc: 90.93%
+  Batch 40/100 | Loss: 0.3486 | Acc: 89.48%
+  Batch 50/100 | Loss: 0.3298 | Acc: 90.07%
+  Batch 60/100 | Loss: 0.1549 | Acc: 90.57%
+  Batch 70/100 | Loss: 0.2201 | Acc: 90.49%
+  Batch 80/100 | Loss: 0.4397 | Acc: 90.59%
+  Batch 90/100 | Loss: 0.3704 | Acc: 90.52%
+Train | Loss: 0.2555 | Acc: 90.60%
+Val   | Loss: 0.3030 | Acc: 87.97%
+  Saved best model with val acc: 87.97%
+
+Epoch 8/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.1477 | Acc: 93.75%
+  Batch 10/100 | Loss: 0.2626 | Acc: 86.93%
+  Batch 20/100 | Loss: 0.1700 | Acc: 88.99%
+  Batch 30/100 | Loss: 0.3248 | Acc: 89.92%
+  Batch 40/100 | Loss: 0.1273 | Acc: 89.79%
+  Batch 50/100 | Loss: 0.0434 | Acc: 89.95%
+  Batch 60/100 | Loss: 0.0764 | Acc: 90.47%
+  Batch 70/100 | Loss: 0.3173 | Acc: 90.58%
+  Batch 80/100 | Loss: 0.0648 | Acc: 90.90%
+  Batch 90/100 | Loss: 0.1078 | Acc: 91.00%
+Train | Loss: 0.2210 | Acc: 91.10%
+Val   | Loss: 0.2492 | Acc: 89.72%
+  Saved best model with val acc: 89.72%
+
+Epoch 9/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.1908 | Acc: 87.50%
+  Batch 10/100 | Loss: 0.1928 | Acc: 93.75%
+  Batch 20/100 | Loss: 0.1920 | Acc: 93.45%
+  Batch 30/100 | Loss: 0.0238 | Acc: 93.55%
+  Batch 40/100 | Loss: 0.0152 | Acc: 93.60%
+  Batch 50/100 | Loss: 0.0374 | Acc: 93.50%
+  Batch 60/100 | Loss: 0.1331 | Acc: 93.34%
+  Batch 70/100 | Loss: 0.0644 | Acc: 93.31%
+  Batch 80/100 | Loss: 0.0199 | Acc: 93.44%
+  Batch 90/100 | Loss: 0.2325 | Acc: 93.34%
+Train | Loss: 0.1668 | Acc: 93.48%
+Val   | Loss: 0.2096 | Acc: 91.48%
+  Saved best model with val acc: 91.48%
+
+Epoch 10/10
+----------------------------------------
+  Batch 0/100 | Loss: 0.0533 | Acc: 100.00%
+  Batch 10/100 | Loss: 0.0626 | Acc: 95.45%
+  Batch 20/100 | Loss: 0.1580 | Acc: 94.94%
+  Batch 30/100 | Loss: 0.1095 | Acc: 95.77%
+  Batch 40/100 | Loss: 0.0998 | Acc: 95.58%
+  Batch 50/100 | Loss: 0.3086 | Acc: 94.85%
+  Batch 60/100 | Loss: 0.0509 | Acc: 94.67%
+  Batch 70/100 | Loss: 0.2551 | Acc: 94.28%
+  Batch 80/100 | Loss: 0.2703 | Acc: 94.21%
+  Batch 90/100 | Loss: 0.1228 | Acc: 94.16%
+Train | Loss: 0.1400 | Acc: 94.11%
+Val   | Loss: 0.2009 | Acc: 92.23%
+  Saved best model with val acc: 92.23%
+
+==================================================
+Training completed!
+Best validation accuracy: 92.23%
+
+============================================================
+Training Summary:
+  Best validation accuracy: 92.23%
+  Model saved as: best_model.pth
+============================================================
+
