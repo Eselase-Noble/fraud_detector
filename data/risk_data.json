@@ -1,0 +1,11 @@
+[
+  {
+    "country": "RU",
+    "risk_level": "high",
+    "reason": "High fraud incidence"
+  },
+  {
+    "country": "US",
+    "risk_level": "low"
+  }
+]

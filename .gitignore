@@ -79,8 +79,8 @@ htmlcov/
 dmypy.json
 
 # Project specific
-/data/*.csv
-/data/*.json
+#/data/*.csv
+#/data/*.json
 !/data/.gitkeep
 
 sync_data_with_db.py
