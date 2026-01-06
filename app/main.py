@@ -13,6 +13,12 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",      # Vue (Vite)
         "http://127.0.0.1:5173",
+        "http://localhost:5174",  # Vue (Vite)
+        "http://127.0.0.1:5174",
+        "http://fraud-detector.africodelab.net",
+        "http://fraud-detector.africodelab.net/",
+        "https://fraud-detector.africodelab.net",
+        "https://fraud-detector.africodelab.net/"
     ],
     allow_credentials=True,
     allow_methods=["*"],             # GET, POST, PUT, DELETE, OPTIONS
