@@ -82,3 +82,5 @@ dmypy.json
 /data/*.csv
 /data/*.json
 !/data/.gitkeep
+
+sync_data_with_db.py
