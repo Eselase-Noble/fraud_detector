@@ -16,7 +16,7 @@ async def detect(transaction: Transaction, background_tasks: BackgroundTasks):
     result = await detect_fraud(transaction, history)
 
     # Persist result asynchronously without blocking response
-    background_tasks.add_task(save_fraud_result, result)
+    background_tasks.add_task(save_fraud_result, result, transaction)
     # print("Result:", result)
     return result
 
