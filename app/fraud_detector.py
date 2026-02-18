@@ -59,8 +59,16 @@ async def _get_user_risk_tier(user_id: str) -> str:
     return "standard"
 
 
+def _to_utc(dt: datetime) -> datetime:
+    """Normalise to UTC-aware. Naive datetimes are assumed to be UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _hours_between(a: datetime, b: datetime) -> float:
-    return abs((a - b).total_seconds()) / 3600
+    """Hours between two datetimes, safe for mixed naive/aware inputs."""
+    return abs((_to_utc(a) - _to_utc(b)).total_seconds()) / 3600
 
 
 def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float]:

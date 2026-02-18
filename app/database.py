@@ -236,11 +236,11 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                         device_id, ip_address, timestamp
                     )
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                    ON CONFLICT (transaction_id) DO UPDATE SET
-                        amount            = EXCLUDED.amount,
-                        merchant_category = EXCLUDED.merchant_category,
-                        location          = EXCLUDED.location,
-                        device_id         = EXCLUDED.device_id
+                    # ON CONFLICT (transaction_id) DO UPDATE SET
+                    #     amount            = EXCLUDED.amount,
+                    #     merchant_category = EXCLUDED.merchant_category,
+                    #     location          = EXCLUDED.location,
+                    #     device_id         = EXCLUDED.device_id
                     """,
                     txn.transaction_id,
                     txn.user_id,

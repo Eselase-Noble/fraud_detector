@@ -14,6 +14,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.database import get_all_transactions
+from app.utils import to_utc
 
 router = APIRouter( tags=["Analytics"])
 
@@ -79,11 +80,8 @@ async def fraud_stats(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-    txns = [
-        t for t in txns
-        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
-    ]
+    txns = [t for t in txns if t.timestamp and to_utc(t.timestamp) >= cutoff]
+
     total = len(txns)
     blocked = sum(1 for t in txns if getattr(t, "decision", None) == "BLOCK")
     reviewed = sum(1 for t in txns if getattr(t, "decision", None) == "REVIEW")
@@ -112,17 +110,14 @@ async def timeseries(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-    txns = [
-        t for t in txns
-        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
-    ]
+    txns = [t for t in txns if t.timestamp and to_utc(t.timestamp) >= cutoff]
+
     buckets: dict[str, dict] = defaultdict(lambda: {
         "total": 0, "blocked": 0, "reviewed": 0, "allowed": 0, "total_amount": 0.0
     })
 
     for t in txns:
-        day_key = t.timestamp.strftime("%Y-%m-%d")
+        day_key = to_utc(t.timestamp).strftime("%Y-%m-%d")
         b = buckets[day_key]
         b["total"] += 1
         b["total_amount"] += t.amount
@@ -147,11 +142,8 @@ async def top_users(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-    txns = [
-        t for t in txns
-        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
-    ]
+    txns = [t for t in txns if t.timestamp and to_utc(t.timestamp) >= cutoff]
+
     user_data: dict[str, dict] = defaultdict(lambda: {
         "transaction_count": 0, "blocked_count": 0, "total_amount": 0.0
     })
@@ -176,11 +168,8 @@ async def top_users(
 async def location_risk(days: int = Query(30, ge=1, le=365)):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-    txns = [
-        t for t in txns
-        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
-    ]
+    txns = [t for t in txns if t.timestamp and to_utc(t.timestamp) >= cutoff]
+
     loc_data: dict[str, dict] = defaultdict(lambda: {
         "transaction_count": 0, "blocked_count": 0, "total_amount": 0.0
     })
@@ -205,11 +194,8 @@ async def location_risk(days: int = Query(30, ge=1, le=365)):
 async def signal_frequency(days: int = Query(30, ge=1, le=365)):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-    txns = [
-        t for t in txns
-        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
-    ]
+    txns = [t for t in txns if t.timestamp and to_utc(t.timestamp) >= cutoff]
+
     counter: Counter = Counter()
     for t in txns:
         signals = getattr(t, "signals", []) or []
