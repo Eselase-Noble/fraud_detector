@@ -206,29 +206,92 @@ async def save_transaction(txn: Transaction) -> None:
 
 # ─── Fraud Results ────────────────────────────────────────────────────────────
 
-async def save_fraud_result(result: FraudResult) -> None:
-    """Persist a FraudResult. Also ensures the parent transaction exists."""
+async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = None) -> None:
+    """
+    Persist a FraudResult atomically.
+
+    The FK constraint requires transactions.transaction_id to exist BEFORE
+    fraud_results can reference it.  We solve this by:
+      1. Upserting the Transaction first (if provided).
+      2. Upserting the FraudResult second.
+    Both writes share the same connection and are wrapped in a single
+    database transaction so they succeed or fail together.
+
+    The `txn` argument should always be supplied from the router layer.
+    If it is somehow omitted, we attempt a bare SELECT to verify the parent
+    row exists and raise a clear error rather than letting Postgres surface a
+    cryptic FK violation.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO fraud_results (transaction_id, score, decision, reason, signals, processed_at)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-            ON CONFLICT (transaction_id) DO UPDATE SET
-                score        = EXCLUDED.score,
-                decision     = EXCLUDED.decision,
-                reason       = EXCLUDED.reason,
-                signals      = EXCLUDED.signals,
-                processed_at = EXCLUDED.processed_at
-            """,
-            result.transaction_id,
-            result.score,
-            result.decision,
-            result.reason,
-            json.dumps(result.signals),
-            result.processed_at,
-        )
-    logger.debug("Saved fraud result for %s: %s (%.2f)", result.transaction_id, result.decision, result.score)
+        async with conn.transaction():          # ← atomic: both writes or neither
+
+            # ── Step 1: guarantee the parent row exists ──────────────────────
+            if txn is not None:
+                await conn.execute(
+                    """
+                    INSERT INTO transactions (
+                        transaction_id, user_id, amount, currency,
+                        merchant_id, merchant_category, location,
+                        device_id, ip_address, timestamp
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                    ON CONFLICT (transaction_id) DO UPDATE SET
+                        amount            = EXCLUDED.amount,
+                        merchant_category = EXCLUDED.merchant_category,
+                        location          = EXCLUDED.location,
+                        device_id         = EXCLUDED.device_id
+                    """,
+                    txn.transaction_id,
+                    txn.user_id,
+                    txn.amount,
+                    txn.currency,
+                    txn.merchant_id,
+                    txn.merchant_category,
+                    txn.location,
+                    txn.device_id,
+                    txn.ip_address,
+                    txn.timestamp,
+                )
+            else:
+                # No Transaction object supplied — verify the row already exists
+                exists = await conn.fetchval(
+                    "SELECT 1 FROM transactions WHERE transaction_id = $1",
+                    result.transaction_id,
+                )
+                if not exists:
+                    raise ValueError(
+                        f"Cannot save FraudResult: transaction '{result.transaction_id}' "
+                        f"does not exist in the transactions table. "
+                        f"Pass the original Transaction object to save_fraud_result()."
+                    )
+
+            # ── Step 2: upsert the fraud result ──────────────────────────────
+            await conn.execute(
+                """
+                INSERT INTO fraud_results (
+                    transaction_id, score, decision, reason, signals, processed_at
+                )
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                ON CONFLICT (transaction_id) DO UPDATE SET
+                    score        = EXCLUDED.score,
+                    decision     = EXCLUDED.decision,
+                    reason       = EXCLUDED.reason,
+                    signals      = EXCLUDED.signals,
+                    processed_at = EXCLUDED.processed_at
+                """,
+                result.transaction_id,
+                result.score,
+                result.decision,
+                result.reason,
+                json.dumps(result.signals),
+                result.processed_at,
+            )
+
+    logger.debug(
+        "Saved transaction + fraud result for %s: %s (%.2f)",
+        result.transaction_id, result.decision, result.score,
+    )
 
 
 # ─── CSV Ingestion ────────────────────────────────────────────────────────────

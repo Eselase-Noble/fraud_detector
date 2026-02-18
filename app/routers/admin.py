@@ -19,7 +19,7 @@ from pydantic import BaseModel, HttpUrl
 
 from app.database import _get_pool
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+router = APIRouter( tags=["Admin"])
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
