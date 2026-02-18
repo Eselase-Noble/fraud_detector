@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from app.database import get_all_transactions
 
-router = APIRouter(prefix="/analytics", tags=["Analytics"])
+router = APIRouter( tags=["Analytics"])
 
 
 # ─── Response Models ──────────────────────────────────────────────────────────
@@ -79,8 +79,11 @@ async def fraud_stats(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-
+    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
+    txns = [
+        t for t in txns
+        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
+    ]
     total = len(txns)
     blocked = sum(1 for t in txns if getattr(t, "decision", None) == "BLOCK")
     reviewed = sum(1 for t in txns if getattr(t, "decision", None) == "REVIEW")

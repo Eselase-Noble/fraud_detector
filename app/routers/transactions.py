@@ -69,7 +69,7 @@ async def list_transactions(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user_id: str = Query(None),
-    decision: str = Query(None, regex="^(ALLOW|REVIEW|BLOCK)$"),
+    decision: str = Query(None, pattern="^(ALLOW|REVIEW|BLOCK)$"),
 ):
     txns = await get_all_transactions(limit=limit, offset=offset, user_id=user_id, decision=decision)
     return txns

@@ -1,14 +1,15 @@
 """
 models.py
 ---------
-Pydantic models for the fraud detection system.
+Pydantic v2 compatible models for the fraud detection system.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import List, Optional
-from pydantic import BaseModel, Field, validator
 import uuid
+from datetime import datetime, timezone
+from typing import Annotated, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
@@ -27,24 +28,23 @@ class Transaction(BaseModel):
     ip_address: Optional[str] = None
     timestamp: datetime = Field(default_factory=_now)
 
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {"json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class FraudResult(BaseModel):
     transaction_id: str
     score: float = Field(..., ge=0.0, le=1.0, description="Fraud probability score")
-    decision: str = Field(..., regex="^(ALLOW|REVIEW|BLOCK)$")
+    decision: str = Field(..., pattern="^(ALLOW|REVIEW|BLOCK)$")
     reason: str
     signals: List[str] = Field(default_factory=list)
     processed_at: datetime = Field(default_factory=_now)
 
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {"json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class BatchTransaction(BaseModel):
-    transactions: List[Transaction] = Field(..., min_items=1, max_items=500)
+    # Pydantic v2: min_length / max_length via Annotated
+    transactions: Annotated[List[Transaction], Field(min_length=1, max_length=500)]
 
 
 class BatchFraudResult(BaseModel):
