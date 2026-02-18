@@ -236,11 +236,11 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                         device_id, ip_address, timestamp
                     )
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                    # ON CONFLICT (transaction_id) DO UPDATE SET
-                    #     amount            = EXCLUDED.amount,
-                    #     merchant_category = EXCLUDED.merchant_category,
-                    #     location          = EXCLUDED.location,
-                    #     device_id         = EXCLUDED.device_id
+                    ON CONFLICT (transaction_id) DO UPDATE SET
+                amount            = EXCLUDED.amount,
+                merchant_category = EXCLUDED.merchant_category,
+                location          = EXCLUDED.location,
+                device_id         = EXCLUDED.device_id
                     """,
                     txn.transaction_id,
                     txn.user_id,
@@ -273,12 +273,7 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                     transaction_id, score, decision, reason, signals, processed_at
                 )
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-                ON CONFLICT (transaction_id) DO UPDATE SET
-                    score        = EXCLUDED.score,
-                    decision     = EXCLUDED.decision,
-                    reason       = EXCLUDED.reason,
-                    signals      = EXCLUDED.signals,
-                    processed_at = EXCLUDED.processed_at
+                ON CONFLICT (transaction_id) DO NOTHING
                 """,
                 result.transaction_id,
                 result.score,
@@ -319,7 +314,12 @@ async def save_csv_to_db(filename: str, content: bytes) -> int:
                         device_id, ip_address, timestamp
                     )
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                    ON CONFLICT (transaction_id) DO NOTHING
+                    ON CONFLICT (transaction_id) DO UPDATE SET
+                    score        = EXCLUDED.score,
+                    decision     = EXCLUDED.decision,
+                    reason       = EXCLUDED.reason,
+                    signals      = EXCLUDED.signals,
+                    processed_at = EXCLUDED.processed_at
                     """,
                     row["transaction_id"],
                     row["user_id"],
@@ -379,7 +379,12 @@ async def save_bulk_csv_to_db(filename: str, content: bytes) -> int:
                 device_id, ip_address, timestamp
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            ON CONFLICT (transaction_id) DO NOTHING
+            ON CONFLICT (transaction_id) DO UPDATE SET
+                    score        = EXCLUDED.score,
+                    decision     = EXCLUDED.decision,
+                    reason       = EXCLUDED.reason,
+                    signals      = EXCLUDED.signals,
+                    processed_at = EXCLUDED.processed_at
             """,
             records,
         )

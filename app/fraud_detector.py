@@ -19,6 +19,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from app.models import Transaction, FraudResult
 from app.vector_store import load_vector_store
 from app.external import load_risk_data
+from app.utils import to_utc, utc_now
 
 load_dotenv()
 
@@ -59,16 +60,9 @@ async def _get_user_risk_tier(user_id: str) -> str:
     return "standard"
 
 
-def _to_utc(dt: datetime) -> datetime:
-    """Normalise to UTC-aware. Naive datetimes are assumed to be UTC."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
 def _hours_between(a: datetime, b: datetime) -> float:
     """Hours between two datetimes, safe for mixed naive/aware inputs."""
-    return abs((_to_utc(a) - _to_utc(b)).total_seconds()) / 3600
+    return abs((to_utc(a) - to_utc(b)).total_seconds()) / 3600
 
 
 def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float]:
@@ -76,7 +70,7 @@ def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[lis
     delta = 0.0
     if not history:
         return signals, delta
-    now = txn.timestamp or datetime.now(timezone.utc)
+    now = txn.timestamp or utc_now()
     recent_1h = [h for h in history if _hours_between(now, h.timestamp) <= 1]
     if len(recent_1h) >= 5:
         signals.append(f"High velocity: {len(recent_1h)} transactions in last hour")
@@ -144,7 +138,7 @@ async def detect_fraud(txn: Transaction, history: list[Transaction]) -> FraudRes
             score += 0.2
             if history[0].timestamp:
                 hours = _hours_between(
-                    txn.timestamp or datetime.now(timezone.utc), history[0].timestamp
+                    txn.timestamp or utc_now(), history[0].timestamp
                 )
                 if hours < 2:
                     signals.append("Impossible travel: location changed within 2 hours")
