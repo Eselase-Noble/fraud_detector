@@ -424,6 +424,10 @@ def _row_to_transaction(row: asyncpg.Record) -> Transaction:
     score = data.pop("score", None)
     raw_signals = data.pop("signals", None)
 
+    # ✅ Convert IPv4Address -> string
+    if data.get("ip_address") is not None:
+        data["ip_address"] = str(data["ip_address"])
+
     signals: list[str] = []
     if isinstance(raw_signals, str):
         try:
