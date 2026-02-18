@@ -5,7 +5,7 @@ from app.models import Transaction, FraudResult, BatchTransaction, BatchFraudRes
 from app.fraud_detector import detect_fraud
 from app.database import get_user_history, get_transaction_by_id, save_fraud_result, get_all_transactions
 
-router = APIRouter(prefix="/transactions", tags=["Transactions"])
+router = APIRouter( tags=["Transactions"])
 
 
 # ─── Single Transaction Detection ────────────────────────────────────────────

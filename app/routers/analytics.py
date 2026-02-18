@@ -112,8 +112,11 @@ async def timeseries(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-
+    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
+    txns = [
+        t for t in txns
+        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
+    ]
     buckets: dict[str, dict] = defaultdict(lambda: {
         "total": 0, "blocked": 0, "reviewed": 0, "allowed": 0, "total_amount": 0.0
     })
@@ -144,8 +147,11 @@ async def top_users(
 ):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-
+    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
+    txns = [
+        t for t in txns
+        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
+    ]
     user_data: dict[str, dict] = defaultdict(lambda: {
         "transaction_count": 0, "blocked_count": 0, "total_amount": 0.0
     })
@@ -170,8 +176,11 @@ async def top_users(
 async def location_risk(days: int = Query(30, ge=1, le=365)):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-
+    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
+    txns = [
+        t for t in txns
+        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
+    ]
     loc_data: dict[str, dict] = defaultdict(lambda: {
         "transaction_count": 0, "blocked_count": 0, "total_amount": 0.0
     })
@@ -196,8 +205,11 @@ async def location_risk(days: int = Query(30, ge=1, le=365)):
 async def signal_frequency(days: int = Query(30, ge=1, le=365)):
     txns = await get_all_transactions()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
-
+    # txns = [t for t in txns if t.timestamp and t.timestamp >= cutoff]
+    txns = [
+        t for t in txns
+        if t.timestamp and t.timestamp.replace(tzinfo=timezone.utc) >= cutoff
+    ]
     counter: Counter = Counter()
     for t in txns:
         signals = getattr(t, "signals", []) or []
