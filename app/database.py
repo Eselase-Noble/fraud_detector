@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 
 import asyncpg
@@ -25,6 +26,9 @@ async def get_user_history(user_id: str, limit: int = 20) -> List[Transaction]:
         """,
         user_id, limit
     )
+
+    logging.info("History Data: " + rows)
+
     await conn.close()
     return [Transaction(**dict(r)) for r in rows]
 
