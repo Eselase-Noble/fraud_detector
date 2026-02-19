@@ -1,0 +1,4 @@
+Topic: 2025 Fraude
+Source: tavily
+HTTPError('401 Client Error: Unauthorized for url: https://api.tavily.com/search')
+---

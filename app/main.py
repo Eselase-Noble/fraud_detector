@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, close_db
-from app.routers import transactions, users, docs, analytics, admin
+from app.routers import transactions, users, docs, analytics, admin, knowledge
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +58,7 @@ app.include_router(users.router,        prefix="/users",        tags=["Users"])
 app.include_router(docs.router,         prefix="/docs",         tags=["Documents"])
 app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics"])
 app.include_router(admin.router,        prefix="/admin",        tags=["Admin"])
+app.include_router(knowledge.router,        prefix="/knowledge",        tags=["Knowledge"])
 
 
 # ─── Health Check ─────────────────────────────────────────────────────────────

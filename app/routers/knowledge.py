@@ -13,13 +13,16 @@ import os
 import asyncio
 from typing import List, Optional
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, Query
 from pydantic import BaseModel
 
 from app.vector_store import load_vector_store, rebuild_vector_store
 from app.database import save_csv_to_db
 
-router = APIRouter(prefix="/knowledge", tags=["Knowledge Base"])
+
+load_dotenv()
+router = APIRouter( tags=["Knowledge Base"])
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -71,7 +74,7 @@ async def search_docs(request: SearchRequest):
     retriever = _vector_store.as_retriever(search_kwargs={"k": request.k})
 
     try:
-        docs = await asyncio.to_thread(retriever.get_relevant_documents, request.query)
+        docs = await asyncio.to_thread(retriever.invoke, request.query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
@@ -158,7 +161,9 @@ async def enrich_from_web(request: OnlineEnrichRequest, background_tasks: Backgr
     Uses Tavily to fetch real-time fraud threat intelligence and saves it to
     the knowledge base for future RAG queries.
     """
+
     tavily_key = os.getenv("TAVILY_API_KEY")
+    print("TAVILY_KEY: ",tavily_key)
     if not tavily_key:
         raise HTTPException(
             status_code=503,
@@ -167,32 +172,61 @@ async def enrich_from_web(request: OnlineEnrichRequest, background_tasks: Backgr
 
     try:
         from langchain_community.tools.tavily_search import TavilySearchResults
-        tool = TavilySearchResults(max_results=request.max_results, tavily_api_key=tavily_key)
+
+        tool = TavilySearchResults(
+            max_results=request.max_results,
+            tavily_api_key=tavily_key,
+        )
+
         results = await asyncio.to_thread(tool.invoke, request.topic)
+
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Web fetch failed: {e}")
 
     if not results:
         return {"status": "no_results", "topic": request.topic}
 
-    # Persist fetched content as a .txt doc
+    # Normalize single string response into list
+    if isinstance(results, str):
+        results = [results]
+
     content_lines = []
+
     for r in results:
-        content_lines.append(f"Source: {r.get('url', 'unknown')}")
-        content_lines.append(r.get("content", ""))
+        if isinstance(r, dict):
+            url = r.get("url", "unknown")
+            content = r.get("content", "")
+        else:
+            # If Tavily returned a plain string
+            url = "tavily"
+            content = str(r)
+
+        content_lines.append(f"Topic: {request.topic}")
+        content_lines.append(f"Source: {url}")
+        content_lines.append(content.strip())
         content_lines.append("---")
 
     doc_content = "\n".join(content_lines)
-    safe_topic = request.topic[:50].replace(" ", "_").replace("/", "-")
+
+    # Safe filename
     from datetime import datetime
+
+    safe_topic = request.topic[:50].replace(" ", "_").replace("/", "-")
     filename = f"online_intel_{safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+
     target_dir = os.path.join(BASE_DIR, "txt")
     os.makedirs(target_dir, exist_ok=True)
+
     file_path = os.path.join(target_dir, filename)
 
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(doc_content)
+    # Persist file
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(doc_content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save document: {e}")
 
+    # Refresh retriever in background
     background_tasks.add_task(_refresh_retriever)
 
     return {
