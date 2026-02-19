@@ -58,7 +58,7 @@ app.include_router(users.router,        prefix="/users",        tags=["Users"])
 app.include_router(docs.router,         prefix="/docs",         tags=["Documents"])
 app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics"])
 app.include_router(admin.router,        prefix="/admin",        tags=["Admin"])
-app.include_router(knowledge.router,        prefix="/knowledge",        tags=["Knowledge"])
+app.include_router(knowledge.router,        prefix="/knowledge",        tags=["Knowledge Base"])
 
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
