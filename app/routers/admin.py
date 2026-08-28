@@ -128,6 +128,19 @@ async def create_integration(body: IntegrationCreate):
             body.portal_email,
             pw_hash,
         )
+        # Mirror the portal login into partner_users so it works immediately
+        # (partner login authenticates against partner_users, not integrations).
+        if body.portal_email and pw_hash:
+            await conn.execute(
+                """
+                INSERT INTO partner_users (integration_id, email, password_hash, name, role)
+                VALUES ($1, $2, $3, 'Primary admin', 'admin')
+                ON CONFLICT (email) DO UPDATE SET
+                    integration_id = EXCLUDED.integration_id,
+                    password_hash  = EXCLUDED.password_hash
+                """,
+                row["id"], body.portal_email.strip().lower(), pw_hash,
+            )
 
     return IntegrationResponse(**dict(row), api_key=raw_key)
 
@@ -185,6 +198,17 @@ async def set_portal_credentials(integration_id: int, body: PortalCredentials):
                 f"WHERE id = $3 RETURNING {_INTEGRATION_COLS}",
                 body.portal_email.strip().lower(), pw_hash, integration_id,
             )
+            if row:
+                await conn.execute(
+                    """
+                    INSERT INTO partner_users (integration_id, email, password_hash, name, role)
+                    VALUES ($1, $2, $3, 'Primary admin', 'admin')
+                    ON CONFLICT (email) DO UPDATE SET
+                        integration_id = EXCLUDED.integration_id,
+                        password_hash  = EXCLUDED.password_hash
+                    """,
+                    integration_id, body.portal_email.strip().lower(), pw_hash,
+                )
         except Exception:
             raise HTTPException(409, detail="That portal email is already in use.")
     if not row:
