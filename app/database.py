@@ -86,9 +86,59 @@ async def _create_tables() -> None:
                 FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                user_id     TEXT PRIMARY KEY,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                risk_tier   TEXT DEFAULT 'standard',
+                is_flagged  BOOLEAN NOT NULL DEFAULT FALSE,
+                notes       TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id                BIGSERIAL PRIMARY KEY,
+                transaction_id    TEXT NOT NULL,
+                analyst_id        TEXT,
+                action            TEXT NOT NULL,
+                previous_decision TEXT,
+                new_decision      TEXT,
+                note              TEXT,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_documents (
+                id           BIGSERIAL PRIMARY KEY,
+                filename     TEXT NOT NULL,
+                file_type    TEXT NOT NULL,
+                size_bytes   BIGINT,
+                source       TEXT DEFAULT 'upload',
+                ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                vector_count INT,
+                notes        TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS integrations (
+                id           BIGSERIAL PRIMARY KEY,
+                partner_name TEXT NOT NULL,
+                webhook_url  TEXT NOT NULL,
+                api_key_hash TEXT NOT NULL,
+                is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+                notify_on    TEXT[] DEFAULT ARRAY['BLOCK', 'REVIEW'],
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_used_at TIMESTAMPTZ
+            );
+
+            -- Partner registry serves any financial institution (bank, fintech, PSP,
+            -- microfinance, mobile money, SACCO…) and records how they feed us data.
+            ALTER TABLE integrations ADD COLUMN IF NOT EXISTS institution_type  TEXT DEFAULT 'bank';
+            ALTER TABLE integrations ADD COLUMN IF NOT EXISTS connection_method TEXT DEFAULT 'rest_api';
+            ALTER TABLE integrations ADD COLUMN IF NOT EXISTS contact_email     TEXT;
+
             CREATE INDEX IF NOT EXISTS idx_txn_user_id    ON transactions(user_id);
             CREATE INDEX IF NOT EXISTS idx_txn_timestamp  ON transactions(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_fr_decision    ON fraud_results(decision);
+            CREATE INDEX IF NOT EXISTS idx_audit_txn      ON audit_log(transaction_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_analyst  ON audit_log(analyst_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_created  ON audit_log(created_at DESC);
         """)
 
 

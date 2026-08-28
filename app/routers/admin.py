@@ -24,10 +24,18 @@ router = APIRouter( tags=["Admin"])
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+# Any financial institution — not just banks.
+INSTITUTION_TYPES = {"bank", "fintech", "psp", "microfinance", "mobile_money", "sacco", "exchange", "other"}
+# How the institution feeds transaction data to Sentinel.
+CONNECTION_METHODS = {"rest_api", "batch_api", "database", "file_sftp"}
+
 class IntegrationCreate(BaseModel):
     partner_name: str
     webhook_url: str
     notify_on: List[str] = ["BLOCK", "REVIEW"]
+    institution_type: str = "bank"
+    connection_method: str = "rest_api"
+    contact_email: Optional[str] = None
 
 class IntegrationResponse(BaseModel):
     id: int
@@ -35,9 +43,12 @@ class IntegrationResponse(BaseModel):
     webhook_url: str
     is_active: bool
     notify_on: List[str]
+    institution_type: str = "bank"
+    connection_method: str = "rest_api"
+    contact_email: Optional[str] = None
     created_at: datetime
     last_used_at: Optional[datetime] = None
-    # api_key returned only at creation time, never again
+    # api_key returned only at creation / rotation time, never again
     api_key: Optional[str] = None
 
 class ReviewAction(BaseModel):
@@ -76,6 +87,10 @@ async def create_integration(body: IntegrationCreate):
     invalid = set(body.notify_on) - valid_decisions
     if invalid:
         raise HTTPException(400, detail=f"Invalid notify_on values: {invalid}")
+    if body.institution_type not in INSTITUTION_TYPES:
+        raise HTTPException(400, detail=f"institution_type must be one of {sorted(INSTITUTION_TYPES)}")
+    if body.connection_method not in CONNECTION_METHODS:
+        raise HTTPException(400, detail=f"connection_method must be one of {sorted(CONNECTION_METHODS)}")
 
     # Generate a secure API key — shown once, stored as a hash
     raw_key = secrets.token_hex(32)
@@ -85,17 +100,30 @@ async def create_integration(body: IntegrationCreate):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO integrations (partner_name, webhook_url, api_key_hash, notify_on)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, partner_name, webhook_url, is_active, notify_on, created_at, last_used_at
+            INSERT INTO integrations
+                (partner_name, webhook_url, api_key_hash, notify_on,
+                 institution_type, connection_method, contact_email)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, partner_name, webhook_url, is_active, notify_on,
+                      institution_type, connection_method, contact_email,
+                      created_at, last_used_at
             """,
             body.partner_name,
             body.webhook_url,
             key_hash,
             body.notify_on,
+            body.institution_type,
+            body.connection_method,
+            body.contact_email,
         )
 
     return IntegrationResponse(**dict(row), api_key=raw_key)
+
+
+_INTEGRATION_COLS = (
+    "id, partner_name, webhook_url, is_active, notify_on, "
+    "institution_type, connection_method, contact_email, created_at, last_used_at"
+)
 
 
 @router.get("/integrations", response_model=List[IntegrationResponse],
@@ -104,10 +132,27 @@ async def list_integrations():
     pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, partner_name, webhook_url, is_active, notify_on, created_at, last_used_at "
-            "FROM integrations ORDER BY created_at DESC"
+            f"SELECT {_INTEGRATION_COLS} FROM integrations ORDER BY created_at DESC"
         )
     return [IntegrationResponse(**dict(r)) for r in rows]
+
+
+@router.post("/integrations/{integration_id}/rotate", response_model=IntegrationResponse,
+             summary="Rotate a partner's API key (invalidates the old one)")
+async def rotate_integration_key(integration_id: int):
+    """Issues a fresh API key and invalidates the previous one. The new key is
+    returned once — the partner must update their credential store immediately."""
+    raw_key = secrets.token_hex(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE integrations SET api_key_hash = $1 WHERE id = $2 RETURNING {_INTEGRATION_COLS}",
+            key_hash, integration_id,
+        )
+    if not row:
+        raise HTTPException(404, detail="Integration not found.")
+    return IntegrationResponse(**dict(row), api_key=raw_key)
 
 
 @router.patch("/integrations/{integration_id}/toggle",
