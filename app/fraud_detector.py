@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from dotenv import load_dotenv
@@ -23,14 +24,31 @@ from app.utils import to_utc, utc_now
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY not set in environment!")
+# AI reasoning is optional: the fraud score/decision are computed by deterministic rules,
+# so the service is fully usable (API-based) without an OpenAI key. When a key is present
+# the LLM/RAG generates a richer explanation; otherwise we fall back to a signals summary.
+llm = None
+vector_store = None
+if OPENAI_API_KEY:
+    try:
+        llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+        vector_store = load_vector_store()
+    except Exception as e:  # pragma: no cover
+        logger.warning("AI reasoning disabled (init failed): %s", e)
+else:
+    logger.warning("OPENAI_API_KEY not set — rule-based scoring only (no LLM reasoning).")
 
-llm = ChatOpenAI(model="gpt-4.1", temperature=0)
-vector_store = load_vector_store()
+
+def _rule_based_reason(decision: str, score: float, signals: list[str]) -> str:
+    """Deterministic explanation used when the LLM is unavailable."""
+    if not signals:
+        return f"Decision {decision} (risk score {score:.2f}). No significant risk signals detected."
+    return f"Decision {decision} at risk score {score:.2f}. Key signals: " + "; ".join(signals) + "."
 
 _tavily: Optional[TavilySearchResults] = None
 if TAVILY_API_KEY:
@@ -172,12 +190,16 @@ async def detect_fraud(txn: Transaction, history: list[Transaction]) -> FraudRes
 
     online_intel_task = asyncio.create_task(_fetch_online_intelligence(txn))
 
-    history_context = [
-        {"amount": h.amount, "location": h.location, "timestamp": h.timestamp.isoformat()}
-        for h in history[:5]
-    ]
-
-    rag_prompt = f"""
+    # Rule-based explanation by default; upgrade to LLM/RAG when available.
+    reason = _rule_based_reason(decision, score, signals)
+    if llm is not None and vector_store is not None:
+        try:
+            history_context = [
+                {"amount": h.amount, "location": h.location,
+                 "timestamp": h.timestamp.isoformat() if h.timestamp else None}
+                for h in history[:5]
+            ]
+            rag_prompt = f"""
 You are a senior fraud detection analyst at a bank.
 
 Transaction: {txn.model_dump()}
@@ -189,14 +211,14 @@ Score: {score:.2f} | Decision: {decision}
 Provide a clear 3-5 sentence explanation referencing specific signals.
 Focus on what a fraud analyst needs to act on this case.
 """
+            retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+            qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=False)
+            rag_result = await asyncio.to_thread(qa_chain.invoke, rag_prompt)
+            reason = rag_result["result"] if isinstance(rag_result, dict) else str(rag_result)
+        except Exception as e:  # pragma: no cover
+            logger.warning("LLM reasoning failed, using rule-based reason: %s", e)
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=False)
-
-    rag_task = asyncio.to_thread(qa_chain.invoke, rag_prompt)
-    rag_result, online_intel = await asyncio.gather(rag_task, online_intel_task)
-
-    reason = rag_result["result"] if isinstance(rag_result, dict) else str(rag_result)
+    online_intel = await online_intel_task
     if online_intel:
         reason += f"\n\n**Live Threat Intelligence:** {online_intel[:500]}..."
 
