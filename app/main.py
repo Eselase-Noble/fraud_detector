@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, close_db
-from app.routers import transactions, users, docs, analytics, admin, knowledge, portal
+from app.routers import transactions, users, docs, analytics, admin, knowledge, portal, staff
+from app.seed import ensure_seed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +25,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────────────
     await init_db()
+    await ensure_seed()
     yield
     # ── Shutdown ─────────────────────────────────────────────────────────────
     await close_db()
@@ -60,6 +62,7 @@ app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics
 app.include_router(admin.router,        prefix="/admin",        tags=["Admin"])
 app.include_router(knowledge.router,        prefix="/knowledge",        tags=["Knowledge Base"])
 app.include_router(portal.router,           prefix="/portal",           tags=["Partner Portal"])
+app.include_router(staff.router,            prefix="/staff",            tags=["Staff"])
 
 
 # ─── Health Check ─────────────────────────────────────────────────────────────

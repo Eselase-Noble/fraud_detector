@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, HttpUrl
 
 from app.database import _get_pool
+from app.portal_auth import hash_password
 
 router = APIRouter( tags=["Admin"])
 
@@ -36,6 +37,9 @@ class IntegrationCreate(BaseModel):
     institution_type: str = "bank"
     connection_method: str = "rest_api"
     contact_email: Optional[str] = None
+    # Optional human portal login provisioned at registration.
+    portal_email: Optional[str] = None
+    portal_password: Optional[str] = None
 
 class IntegrationResponse(BaseModel):
     id: int
@@ -46,10 +50,15 @@ class IntegrationResponse(BaseModel):
     institution_type: str = "bank"
     connection_method: str = "rest_api"
     contact_email: Optional[str] = None
+    portal_email: Optional[str] = None
     created_at: datetime
     last_used_at: Optional[datetime] = None
     # api_key returned only at creation / rotation time, never again
     api_key: Optional[str] = None
+
+class PortalCredentials(BaseModel):
+    portal_email: str
+    portal_password: str
 
 class ReviewAction(BaseModel):
     analyst_id: str
@@ -96,17 +105,18 @@ async def create_integration(body: IntegrationCreate):
     raw_key = secrets.token_hex(32)
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
 
+    pw_hash = hash_password(body.portal_password) if (body.portal_email and body.portal_password) else None
+
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             INSERT INTO integrations
                 (partner_name, webhook_url, api_key_hash, notify_on,
-                 institution_type, connection_method, contact_email)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, partner_name, webhook_url, is_active, notify_on,
-                      institution_type, connection_method, contact_email,
-                      created_at, last_used_at
+                 institution_type, connection_method, contact_email,
+                 portal_email, portal_password_hash)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING {_INTEGRATION_COLS_INLINE}
             """,
             body.partner_name,
             body.webhook_url,
@@ -115,15 +125,20 @@ async def create_integration(body: IntegrationCreate):
             body.institution_type,
             body.connection_method,
             body.contact_email,
+            body.portal_email,
+            pw_hash,
         )
 
     return IntegrationResponse(**dict(row), api_key=raw_key)
 
 
-_INTEGRATION_COLS = (
+# Columns safe to return to clients — never the api_key_hash or portal_password_hash.
+_INTEGRATION_COLS_INLINE = (
     "id, partner_name, webhook_url, is_active, notify_on, "
-    "institution_type, connection_method, contact_email, created_at, last_used_at"
+    "institution_type, connection_method, contact_email, portal_email, "
+    "created_at, last_used_at"
 )
+_INTEGRATION_COLS = _INTEGRATION_COLS_INLINE
 
 
 @router.get("/integrations", response_model=List[IntegrationResponse],
@@ -153,6 +168,28 @@ async def rotate_integration_key(integration_id: int):
     if not row:
         raise HTTPException(404, detail="Integration not found.")
     return IntegrationResponse(**dict(row), api_key=raw_key)
+
+
+@router.post("/integrations/{integration_id}/portal_credentials",
+             response_model=IntegrationResponse,
+             summary="Set or reset a partner's portal login (email + password)")
+async def set_portal_credentials(integration_id: int, body: PortalCredentials):
+    """Provisions the human login used to sign into the partner portal. Distinct
+    from the machine API key. Re-calling replaces the previous credentials."""
+    pw_hash = hash_password(body.portal_password)
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                f"UPDATE integrations SET portal_email = $1, portal_password_hash = $2 "
+                f"WHERE id = $3 RETURNING {_INTEGRATION_COLS}",
+                body.portal_email.strip().lower(), pw_hash, integration_id,
+            )
+        except Exception:
+            raise HTTPException(409, detail="That portal email is already in use.")
+    if not row:
+        raise HTTPException(404, detail="Integration not found.")
+    return IntegrationResponse(**dict(row))
 
 
 @router.patch("/integrations/{integration_id}/toggle",

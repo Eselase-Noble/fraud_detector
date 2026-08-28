@@ -51,26 +51,54 @@ on the decisions it opts into (`BLOCK`/`REVIEW`/`ALLOW`).
 - `database`  — scheduled read-only connector against their transactions table
 - `file_sftp` — CSV drop on SFTP (or portal upload), scored per file
 
-### Self-service partner portal
-Institutions sign in at **Partner Portal** (`/portal`) with their API key
-(`POST /portal/session`, `X-API-Key` header) to: see usage, read copy-paste
-connection samples for all four methods, edit their webhook URL and notification
-events (`PATCH /portal/config`), and run a live test call. Operators can rotate a
-key (`POST /admin/integrations/{id}/rotate`) — the old key stops working at once —
-or suspend/revoke a partner.
+### Two separate front-ends (confidentiality by path)
+- **Operator console** (`fraud_detector_ui`) — Sentinel owners only. Served under
+  **`/platform`** (Vite `base: '/platform/'`, dev on `:5173/platform/`). Detection,
+  analytics, knowledge base, admin/audit and partner management live here.
+- **Partner portal** (`fraud_detector_portal`) — the institutions. Served at the
+  site **root `/`** (dev on `:5174`). Institutions never load operator tooling.
+
+In production a reverse proxy maps `/platform → console` and `/ → portal`; the two
+are independent SPAs, so each side only sees what it manages.
+
+### Portal login (human) vs API key (machine)
+Institutions **sign in with email + password** (`POST /portal/login` → signed
+session token; portal sends it as `Authorization: Bearer …`). Their *systems*
+authenticate to detection with the **API key** (`X-API-Key`). Both map to the same
+partner but are separate credentials — a lost password never exposes the key and
+vice-versa. Passwords are PBKDF2-hashed; tokens are HMAC-signed (`PORTAL_SECRET`).
+
+Operators provision a partner's login from **Partners → Institutions** (fields at
+registration, or the per-row *Set / Reset login* action →
+`POST /admin/integrations/{id}/portal_credentials`). In the portal a signed-in
+institution sees usage, copy-paste connection samples for all four methods, edits
+its webhook URL and events (`PATCH /portal/config`), and runs a live test call.
+Operators can rotate the API key (`POST /admin/integrations/{id}/rotate`) — the old
+key dies immediately — or suspend/revoke a partner (a suspended partner cannot log
+in: `403`).
 
 On startup Sentinel self-provisions its full schema (transactions, fraud_results,
 users, audit_log, knowledge_documents, integrations incl. institution_type /
 connection_method / contact_email), so no manual migration step is needed.
 
-## Sentinel Console (fraud_detector_ui)
-Enterprise Vue console for the fraud service — sidebar shell + Dashboard, Transactions,
-Users & Risk, Detect, Analytics, Knowledge Base, Subscribers, Admin & Audit.
+## Operator console — Sentinel owners (fraud_detector_ui, `/platform`)
+Enterprise Vue console — Dashboard, Transactions, Users & Risk, Detect, Analytics,
+Knowledge Base, Partners → Institutions, and Admin & Audit.
 ```bash
 cd m_fraud/fraud_detector_ui
 npm install            # one-time
 # .env -> VITE_API_BASE_URL=http://localhost:8099  (points at Sentinel)
-npm run dev            # http://localhost:5173
+npm run dev            # http://localhost:5173/platform/
 ```
-The console reads Sentinel's REST endpoints (analytics/stats, transactions, users,
-knowledge, admin) — so bank transactions scored by Sentinel show up here for the org.
+
+## Partner portal — institutions (fraud_detector_portal, `/`)
+Standalone Vue app: email/password login, usage, connection guide (all four
+methods), credentials info, webhook/event editing and a live connection test.
+```bash
+cd m_fraud/fraud_detector_portal
+npm install            # one-time (or it reuses the console's node_modules symlink)
+# .env -> VITE_API_BASE_URL=http://localhost:8099
+npm run dev            # http://localhost:5174
+```
+The two front-ends are independent and talk only to Sentinel's REST API. Operators
+never handle partner passwords in the clear; partners never see operator tooling.

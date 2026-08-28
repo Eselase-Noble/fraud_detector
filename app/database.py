@@ -116,6 +116,17 @@ async def _create_tables() -> None:
                 notes        TEXT
             );
 
+            -- Sentinel staff (operator console login). Separate from partner logins.
+            CREATE TABLE IF NOT EXISTS staff_users (
+                id            BIGSERIAL PRIMARY KEY,
+                email         TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name          TEXT,
+                role          TEXT NOT NULL DEFAULT 'operator',
+                is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
             CREATE TABLE IF NOT EXISTS integrations (
                 id           BIGSERIAL PRIMARY KEY,
                 partner_name TEXT NOT NULL,
@@ -132,6 +143,11 @@ async def _create_tables() -> None:
             ALTER TABLE integrations ADD COLUMN IF NOT EXISTS institution_type  TEXT DEFAULT 'bank';
             ALTER TABLE integrations ADD COLUMN IF NOT EXISTS connection_method TEXT DEFAULT 'rest_api';
             ALTER TABLE integrations ADD COLUMN IF NOT EXISTS contact_email     TEXT;
+            -- Human portal login (distinct from the machine API key).
+            ALTER TABLE integrations ADD COLUMN IF NOT EXISTS portal_email         TEXT;
+            ALTER TABLE integrations ADD COLUMN IF NOT EXISTS portal_password_hash TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_portal_email
+                ON integrations(portal_email) WHERE portal_email IS NOT NULL;
 
             CREATE INDEX IF NOT EXISTS idx_txn_user_id    ON transactions(user_id);
             CREATE INDEX IF NOT EXISTS idx_txn_timestamp  ON transactions(timestamp DESC);
