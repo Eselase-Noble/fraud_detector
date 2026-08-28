@@ -37,3 +37,15 @@ Restart the bank; posted transactions are now scored by Sentinel too.
 
 ## Databases (separate by design)
 - Bank: `banking`  ·  Sentinel: `sentinel`  (both postgres/postgres, localhost:5432)
+
+## Sentinel Console (fraud_detector_ui)
+Enterprise Vue console for the fraud service — sidebar shell + Dashboard, Transactions,
+Users & Risk, Detect, Analytics, Knowledge Base, Admin & Audit.
+```bash
+cd m_fraud/fraud_detector_ui
+npm install            # one-time
+# .env -> VITE_API_BASE_URL=http://localhost:8099  (points at Sentinel)
+npm run dev            # http://localhost:5173
+```
+The console reads Sentinel's REST endpoints (analytics/stats, transactions, users,
+knowledge, admin) — so bank transactions scored by Sentinel show up here for the org.
