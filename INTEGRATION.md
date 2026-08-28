@@ -51,15 +51,29 @@ on the decisions it opts into (`BLOCK`/`REVIEW`/`ALLOW`).
 - `database`  — scheduled read-only connector against their transactions table
 - `file_sftp` — CSV drop on SFTP (or portal upload), scored per file
 
-### Two separate front-ends (confidentiality by path)
-- **Operator console** (`fraud_detector_ui`) — Sentinel owners only. Served under
-  **`/platform`** (Vite `base: '/platform/'`, dev on `:5173/platform/`). Detection,
-  analytics, knowledge base, admin/audit and partner management live here.
-- **Partner portal** (`fraud_detector_portal`) — the institutions. Served at the
-  site **root `/`** (dev on `:5174`). Institutions never load operator tooling.
+### One app, two worlds (confidentiality by login)
+A single Vue app (`fraud_detector_ui`) serves both audiences on **one origin/port**,
+split by path and each gated by its **own login**:
+- **`/`** — partner/client portal. Institutions sign in with a partner email + password.
+- **`/platform`** — operator console (Sentinel staff). Separate staff login; partner
+  tokens are rejected here and vice-versa, so neither side can reach the other's tooling
+  or data. (Run `npm run dev` → both live on `:5173`.)
 
-In production a reverse proxy maps `/platform → console` and `/ → portal`; the two
-are independent SPAs, so each side only sees what it manages.
+### Tenant isolation (partner data is private)
+Every scored transaction is attributed to the partner whose API key produced it
+(`transactions.integration_id`). The **operator console never sees partner
+transactions** — its lists and analytics filter to platform-owned rows
+(`integration_id IS NULL`). Each partner sees only their own transactions,
+analytics and team, enforced server-side on every `/portal/*` call. The portal
+has its own **Overview, Transactions, Analytics, Detect, Team and Connection**
+views; partner `Detect` calls are attributed to that institution.
+
+### User management (both sides)
+- Partners manage their own team in the portal (`/portal/users`, roles
+  admin / analyst / viewer; only admins mutate).
+- Operators manage staff in the console (`/staff/users`, roles admin / operator
+  / viewer). Destructive actions (remove, disable, revoke, rotate, suspend) all
+  require confirmation.
 
 ### Portal login (human) vs API key (machine)
 Institutions **sign in with email + password** (`POST /portal/login` → signed
@@ -81,24 +95,28 @@ On startup Sentinel self-provisions its full schema (transactions, fraud_results
 users, audit_log, knowledge_documents, integrations incl. institution_type /
 connection_method / contact_email), so no manual migration step is needed.
 
-## Operator console — Sentinel owners (fraud_detector_ui, `/platform`)
-Enterprise Vue console — Dashboard, Transactions, Users & Risk, Detect, Analytics,
-Knowledge Base, Partners → Institutions, and Admin & Audit.
+## Front-end (fraud_detector_ui — one app, both worlds)
 ```bash
 cd m_fraud/fraud_detector_ui
 npm install            # one-time
 # .env -> VITE_API_BASE_URL=http://localhost:8099  (points at Sentinel)
-npm run dev            # http://localhost:5173/platform/
+npm run dev
+#   partner portal   → http://localhost:5173/
+#   operator console → http://localhost:5173/platform
 ```
+- Partner portal (`/`): email/password login, usage, connection guide (all four
+  methods), credentials info, webhook/event editing and a live connection test.
+- Operator console (`/platform`): Dashboard, Transactions, Users & Risk, Detect,
+  Analytics, Knowledge Base, Partners → Institutions, Admin & Audit.
 
-## Partner portal — institutions (fraud_detector_portal, `/`)
-Standalone Vue app: email/password login, usage, connection guide (all four
-methods), credentials info, webhook/event editing and a live connection test.
-```bash
-cd m_fraud/fraud_detector_portal
-npm install            # one-time (or it reuses the console's node_modules symlink)
-# .env -> VITE_API_BASE_URL=http://localhost:8099
-npm run dev            # http://localhost:5174
-```
-The two front-ends are independent and talk only to Sentinel's REST API. Operators
-never handle partner passwords in the clear; partners never see operator tooling.
+### Seeded test accounts (dev only — change in production)
+Sentinel provisions these on startup if missing, so you can try both sides before
+enrolling real partners:
+| Where | Email | Password |
+|-------|-------|----------|
+| Operator console `/platform` | `operator@sentinel.local` | `operator123` |
+| Partner portal `/` (bank) | `bank@demo.africode` | `partner123` |
+| Partner portal `/` (fintech) | `fintech@demo.africode` | `partner123` |
+
+Passwords are PBKDF2-hashed; the seed is idempotent (existing rows are never
+overwritten). Operators add real partners under Partners → Institutions.

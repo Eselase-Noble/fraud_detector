@@ -149,6 +149,23 @@ async def _create_tables() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_portal_email
                 ON integrations(portal_email) WHERE portal_email IS NOT NULL;
 
+            -- Partner staff: multiple users per institution, managed in the portal.
+            CREATE TABLE IF NOT EXISTS partner_users (
+                id             BIGSERIAL PRIMARY KEY,
+                integration_id BIGINT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+                email          TEXT UNIQUE NOT NULL,
+                password_hash  TEXT NOT NULL,
+                name           TEXT,
+                role           TEXT NOT NULL DEFAULT 'admin',  -- admin | analyst | viewer
+                is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_partner_users_integration ON partner_users(integration_id);
+
+            -- Attribute each scored transaction to the partner whose key produced it.
+            ALTER TABLE transactions ADD COLUMN IF NOT EXISTS integration_id BIGINT;
+            CREATE INDEX IF NOT EXISTS idx_txn_integration ON transactions(integration_id);
+
             CREATE INDEX IF NOT EXISTS idx_txn_user_id    ON transactions(user_id);
             CREATE INDEX IF NOT EXISTS idx_txn_timestamp  ON transactions(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_fr_decision    ON fraud_results(decision);
@@ -200,16 +217,24 @@ async def get_all_transactions(
     offset: int = 0,
     user_id: Optional[str] = None,
     decision: Optional[str] = None,
+    include_partner: bool = False,
 ) -> List[Transaction]:
     """
     Fetch transactions joined with their fraud result.
     Supports filtering by user_id and/or decision (ALLOW | REVIEW | BLOCK).
+
+    By default this EXCLUDES partner-attributed transactions (integration_id set):
+    the operator console must not see partners' private transaction data. Partner
+    data is served only through the tenant-scoped portal endpoints.
     """
     pool = await _get_pool()
 
     conditions = []
     params: list = []
     idx = 1
+
+    if not include_partner:
+        conditions.append("t.integration_id IS NULL")
 
     if user_id:
         conditions.append(f"t.user_id = ${idx}")
@@ -237,6 +262,112 @@ async def get_all_transactions(
         rows = await conn.fetch(query, *params)
 
     return [_row_to_transaction(r) for r in rows]
+
+
+async def get_partner_transactions(
+    integration_id: int, limit: int = 100, offset: int = 0,
+    decision: Optional[str] = None, search: Optional[str] = None,
+) -> List[Transaction]:
+    """Transactions attributed to a single partner integration, with their decisions."""
+    conditions = ["t.integration_id = $1"]
+    params: list = [integration_id]
+    idx = 2
+    if decision:
+        conditions.append(f"f.decision = ${idx}"); params.append(decision); idx += 1
+    if search:
+        conditions.append(f"(t.user_id ILIKE ${idx} OR t.transaction_id ILIKE ${idx})")
+        params.append(f"%{search}%"); idx += 1
+    where = "WHERE " + " AND ".join(conditions)
+    params += [limit, offset]
+    query = f"""
+        SELECT t.*, f.decision, f.score, f.signals
+        FROM transactions t
+        LEFT JOIN fraud_results f USING (transaction_id)
+        {where}
+        ORDER BY t.timestamp DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    return [_row_to_transaction(r) for r in rows]
+
+
+async def get_partner_transaction_rows(
+    integration_id: int, limit: int = 100, offset: int = 0,
+    decision: Optional[str] = None, search: Optional[str] = None,
+) -> list:
+    """Raw transaction+decision rows (incl. reason) for the portal list view."""
+    conditions = ["t.integration_id = $1"]
+    params: list = [integration_id]
+    idx = 2
+    if decision:
+        conditions.append(f"f.decision = ${idx}"); params.append(decision); idx += 1
+    if search:
+        conditions.append(f"(t.user_id ILIKE ${idx} OR t.transaction_id ILIKE ${idx})")
+        params.append(f"%{search}%"); idx += 1
+    where = "WHERE " + " AND ".join(conditions)
+    params += [limit, offset]
+    query = f"""
+        SELECT t.transaction_id, t.user_id, t.amount, t.currency, t.location,
+               t.merchant_category, t.timestamp,
+               f.decision, f.score, f.reason, f.signals
+        FROM transactions t
+        LEFT JOIN fraud_results f USING (transaction_id)
+        {where}
+        ORDER BY t.timestamp DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    out = []
+    for r in rows:
+        d = dict(r)
+        sig = d.get("signals")
+        if isinstance(sig, str):
+            try: d["signals"] = json.loads(sig)
+            except json.JSONDecodeError: d["signals"] = []
+        if d.get("amount") is not None:
+            d["amount"] = float(d["amount"])
+        out.append(d)
+    return out
+
+
+async def get_partner_usage(integration_id: int) -> dict:
+    """Decision counts + flagged amount for one partner integration."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*)                                            AS scored,
+                COUNT(*) FILTER (WHERE f.decision = 'BLOCK')        AS blocked,
+                COUNT(*) FILTER (WHERE f.decision = 'REVIEW')       AS reviewed,
+                COUNT(*) FILTER (WHERE f.decision = 'ALLOW')        AS allowed,
+                COALESCE(SUM(t.amount) FILTER (WHERE f.decision IN ('BLOCK','REVIEW')), 0) AS flagged_amount
+            FROM transactions t
+            LEFT JOIN fraud_results f USING (transaction_id)
+            WHERE t.integration_id = $1
+            """,
+            integration_id,
+        )
+    return {
+        "scored": row["scored"] or 0, "blocked": row["blocked"] or 0,
+        "reviewed": row["reviewed"] or 0, "allowed": row["allowed"] or 0,
+        "flagged_amount": float(row["flagged_amount"] or 0),
+    }
+
+
+async def resolve_integration_id_by_key(api_key: str) -> Optional[int]:
+    """Return the integration id for a raw API key (used to attribute detections)."""
+    import hashlib
+    key_hash = hashlib.sha256(api_key.strip().encode()).hexdigest()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT id FROM integrations WHERE api_key_hash = $1 AND is_active", key_hash
+        )
 
 
 async def save_transaction(txn: Transaction) -> None:
@@ -272,7 +403,8 @@ async def save_transaction(txn: Transaction) -> None:
 
 # ─── Fraud Results ────────────────────────────────────────────────────────────
 
-async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = None) -> None:
+async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = None,
+                            integration_id: Optional[int] = None) -> None:
     """
     Persist a FraudResult atomically.
 
@@ -299,14 +431,15 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                     INSERT INTO transactions (
                         transaction_id, user_id, amount, currency,
                         merchant_id, merchant_category, location,
-                        device_id, ip_address, timestamp
+                        device_id, ip_address, timestamp, integration_id
                     )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                     ON CONFLICT (transaction_id) DO UPDATE SET
                 amount            = EXCLUDED.amount,
                 merchant_category = EXCLUDED.merchant_category,
                 location          = EXCLUDED.location,
-                device_id         = EXCLUDED.device_id
+                device_id         = EXCLUDED.device_id,
+                integration_id    = COALESCE(EXCLUDED.integration_id, transactions.integration_id)
                     """,
                     txn.transaction_id,
                     txn.user_id,
@@ -318,6 +451,7 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                     txn.device_id,
                     txn.ip_address,
                     txn.timestamp,
+                    integration_id,
                 )
             else:
                 # No Transaction object supplied — verify the row already exists

@@ -1,9 +1,12 @@
-from typing import List
+from typing import List, Optional
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Header
 from app.models import Transaction, FraudResult, BatchTransaction, BatchFraudResult
 from app.fraud_detector import detect_fraud
-from app.database import get_user_history, get_transaction_by_id, save_fraud_result, get_all_transactions
+from app.database import (
+    get_user_history, get_transaction_by_id, save_fraud_result, get_all_transactions,
+    resolve_integration_id_by_key,
+)
 
 router = APIRouter( tags=["Transactions"])
 
@@ -11,13 +14,17 @@ router = APIRouter( tags=["Transactions"])
 # ─── Single Transaction Detection ────────────────────────────────────────────
 
 @router.post("/detect", response_model=FraudResult, summary="Detect fraud on a single transaction")
-async def detect(transaction: Transaction, background_tasks: BackgroundTasks):
+async def detect(transaction: Transaction, background_tasks: BackgroundTasks,
+                 x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     history = await get_user_history(transaction.user_id)
     result = await detect_fraud(transaction, history)
 
+    # Attribute the detection to the calling partner when an API key is supplied,
+    # so it appears on that institution's portal dashboard.
+    integration_id = await resolve_integration_id_by_key(x_api_key) if x_api_key else None
+
     # Persist result asynchronously without blocking response
-    background_tasks.add_task(save_fraud_result, result, transaction)
-    # print("Result:", result)
+    background_tasks.add_task(save_fraud_result, result, transaction, integration_id)
     return result
 
 
