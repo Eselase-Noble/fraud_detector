@@ -698,12 +698,37 @@ async def insert_training_event(evt: dict) -> None:
         )
 
 
+def _auc(pairs: list[tuple[float, int]]) -> Optional[float]:
+    """ROC-AUC via the rank (Mann–Whitney U) method. Needs both classes present."""
+    pos = [p for p, y in pairs if y == 1]
+    neg = [p for p, y in pairs if y == 0]
+    if not pos or not neg:
+        return None
+    ordered = sorted(pairs, key=lambda t: t[0])
+    ranks = [0.0] * len(ordered)
+    i = 0
+    while i < len(ordered):
+        j = i
+        while j + 1 < len(ordered) and ordered[j + 1][0] == ordered[i][0]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1.0  # 1-based average rank for ties
+        for k in range(i, j + 1):
+            ranks[k] = avg_rank
+        i = j + 1
+    sum_pos = sum(r for r, (_, y) in zip(ranks, ordered) if y == 1)
+    n_pos, n_neg = len(pos), len(neg)
+    return (sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+
+
 async def get_learning_metrics(window: int = 500) -> dict:
     """Prequential metrics over the most recent `window` learning events.
 
     Because each row holds the pre-update prediction, this is an honest
     test-then-train estimate of live model quality (no train/test leakage).
+    Returns the full confusion matrix plus derived measures; several are only
+    defined when the window contains both fraud and legit cases (see `notes`).
     """
+    import math
     pool = await _get_pool()
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM training_events")
@@ -720,26 +745,61 @@ async def get_learning_metrics(window: int = 500) -> dict:
                 COUNT(*) FILTER (WHERE label = 1 AND predicted_label = 1)  AS tp,
                 COUNT(*) FILTER (WHERE label = 0 AND predicted_label = 1)  AS fp,
                 COUNT(*) FILTER (WHERE label = 1 AND predicted_label = 0)  AS fn,
+                COUNT(*) FILTER (WHERE label = 0 AND predicted_label = 0)  AS tn,
                 AVG(loss)                                                  AS avg_loss
             FROM recent
             """,
             window,
         )
-    tp, fp, fn = (row["tp"] or 0), (row["fp"] or 0), (row["fn"] or 0)
+        proba_rows = await conn.fetch(
+            "SELECT predicted_proba, label FROM training_events ORDER BY id DESC LIMIT $1",
+            window,
+        )
+
+    n = row["n"] or 0
+    tp, fp, fn, tn = (row["tp"] or 0), (row["fp"] or 0), (row["fn"] or 0), (row["tn"] or 0)
+    actual_pos = row["actual_pos"] or 0
+
     precision = tp / (tp + fp) if (tp + fp) else None
-    recall = tp / (tp + fn) if (tp + fn) else None
-    f1 = (2 * precision * recall / (precision + recall)
-          if precision and recall else None)
+    recall = tp / (tp + fn) if (tp + fn) else None            # sensitivity / TPR
+    specificity = tn / (tn + fp) if (tn + fp) else None        # TNR
+    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+    balanced_acc = ((recall + specificity) / 2) if (recall is not None and specificity is not None) else None
+    mcc_den = math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn - fp * fn) / mcc_den) if mcc_den else None
+    auc = _auc([(float(r["predicted_proba"]), int(r["label"]))
+                for r in proba_rows if r["predicted_proba"] is not None])
+
+    # Human-readable reasons when a metric is undefined (answers "why 0 / —").
+    notes = []
+    if recall is None:
+        notes.append("Recall is undefined: no fraud cases in this window (nothing to catch).")
+    if precision is None:
+        notes.append("Precision is undefined: the model made no fraud predictions in this window.")
+    elif precision == 0:
+        notes.append("Precision is 0: fraud predictions were made but none were correct in this window.")
+
+    def r4(x):
+        return round(x, 4) if x is not None else None
+
     return {
         "total_events": total or 0,
         "window": window,
-        "window_count": row["n"] or 0,
-        "accuracy": round(row["accuracy"], 4) if row["accuracy"] is not None else None,
-        "precision": round(precision, 4) if precision is not None else None,
-        "recall": round(recall, 4) if recall is not None else None,
-        "f1": round(f1, 4) if f1 is not None else None,
-        "avg_loss": round(row["avg_loss"], 4) if row["avg_loss"] is not None else None,
-        "fraud_labels": row["actual_pos"] or 0,
+        "window_count": n,
+        "accuracy": r4(row["accuracy"]),
+        "precision": r4(precision),
+        "recall": r4(recall),
+        "specificity": r4(specificity),
+        "f1": r4(f1),
+        "balanced_accuracy": r4(balanced_acc),
+        "mcc": r4(mcc),
+        "auc": r4(auc),
+        "avg_loss": r4(row["avg_loss"]),
+        "fraud_labels": actual_pos,
+        "fraud_rate": r4(actual_pos / n) if n else None,
+        "confusion": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+        "predicted_positive": row["pred_pos"] or 0,
+        "notes": notes,
     }
 
 
@@ -800,6 +860,20 @@ async def count_by_source() -> list[dict]:
             "SELECT source, COUNT(*) AS n FROM training_events GROUP BY source ORDER BY n DESC"
         )
     return [{"source": r["source"], "count": r["n"]} for r in rows]
+
+
+async def get_learned_transaction_ids() -> list[str]:
+    """Every transaction_id the model has already trained on (from the audit log).
+
+    Used to seed the de-duplication set on startup so previously-exposed data is
+    never learned again, even across restarts.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT transaction_id FROM training_events WHERE transaction_id IS NOT NULL"
+        )
+    return [r["transaction_id"] for r in rows]
 
 
 async def get_result_features(transaction_id: str) -> Optional[list]:

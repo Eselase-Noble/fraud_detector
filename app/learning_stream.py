@@ -28,13 +28,14 @@ import asyncio
 import json
 import logging
 import os
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
 
 from app.privacy import anonymize_event, pepper_fingerprint
-from app.online_model import get_model, persist_model, N_FEATURES, MODEL_VERSION
+from app.online_model import get_model, persist_model, N_FEATURES, MODEL_VERSION, FEATURE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ STREAM = os.getenv("LEARNING_STREAM", "fraud.labels")
 GROUP = "learners"
 CONSUMER = "consumer-1"
 PERSIST_EVERY = 25  # flush model weights to DB every N updates
+SEEN_KEY = f"{STREAM}:seen"  # Redis SET of transaction_ids already trained on
 
 # ─── Broker state ─────────────────────────────────────────────────────────────
 _redis = None                       # redis.asyncio client, or None if unavailable
@@ -50,7 +52,78 @@ _inproc: "asyncio.Queue[dict]" = asyncio.Queue()
 _using_redis = False
 _consumer_task: Optional[asyncio.Task] = None
 _stop = asyncio.Event()
-_stats = {"consumed": 0, "learned": 0, "skipped": 0, "since_persist": 0}
+_stats = {"consumed": 0, "learned": 0, "skipped": 0, "deduped": 0, "since_persist": 0}
+
+# De-duplication: a transaction is trained on at most ONCE, ever. Backed by a
+# Redis SET (durable, cross-process) with an in-memory fallback. Seeded from the
+# training_events audit log on startup so restarts never re-expose old data.
+_seen_mem: set = set()
+
+
+async def _seed_seen() -> None:
+    """Load already-learned transaction_ids so they are never re-trained."""
+    try:
+        from app.database import get_learned_transaction_ids
+        ids = await get_learned_transaction_ids()
+    except Exception as e:  # pragma: no cover
+        logger.warning("Could not seed de-dup set: %s", e)
+        return
+    if not ids:
+        return
+    if _using_redis and _redis is not None:
+        # Only seed if the Redis set is empty (e.g. Redis was flushed); otherwise
+        # trust the existing set. SADD is idempotent so re-seeding is still safe.
+        if await _redis.scard(SEEN_KEY) == 0:
+            for i in range(0, len(ids), 5000):
+                await _redis.sadd(SEEN_KEY, *ids[i:i + 5000])
+    else:
+        _seen_mem.update(ids)
+    logger.info("De-dup set seeded with %d previously-learned transactions.", len(ids))
+
+
+async def _already_seen(txn_id: str) -> bool:
+    if _using_redis and _redis is not None:
+        return bool(await _redis.sismember(SEEN_KEY, txn_id))
+    return txn_id in _seen_mem
+
+
+async def _mark_seen(txn_id: str) -> None:
+    if _using_redis and _redis is not None:
+        await _redis.sadd(SEEN_KEY, txn_id)
+    else:
+        _seen_mem.add(txn_id)
+
+# Latest FX provenance reported by a producer (so the UI can show the rate + source).
+_fx: Optional[dict] = None
+
+
+def get_fx() -> Optional[dict]:
+    return _fx
+
+# ─── Live broadcast (for the real-time SSE view) ──────────────────────────────
+# Each processed learning step is pushed to every connected subscriber so the UI
+# can render the flow of training as it happens.
+_subscribers: set = set()
+# Rolling accuracy over a short window, computed in-memory for the live feed.
+_live_window: deque = deque(maxlen=200)
+
+
+def subscribe() -> "asyncio.Queue":
+    q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    _subscribers.add(q)
+    return q
+
+
+def unsubscribe(q: "asyncio.Queue") -> None:
+    _subscribers.discard(q)
+
+
+def _broadcast(record: dict) -> None:
+    for q in list(_subscribers):
+        try:
+            q.put_nowait(record)
+        except asyncio.QueueFull:
+            pass  # slow client: drop rather than block the consumer
 
 
 async def _connect_redis():
@@ -116,17 +189,38 @@ async def _process(evt: dict) -> bool:
         _stats["skipped"] += 1
         return False
     label = int(evt["label"])
+
+    # De-duplication: never train twice on the same transaction. Old data that has
+    # already been exposed to the model is rejected here, before any learning.
+    txn_id = evt.get("transaction_id")
+    if txn_id and await _already_seen(txn_id):
+        _stats["deduped"] += 1
+        return False
+
     vec = await _resolve_features(evt)
     if vec is None:
         _stats["skipped"] += 1
         logger.debug("Skipping event with no resolvable features: %s", evt.get("transaction_id"))
         return False
 
+    # Capture FX provenance from the producer so the UI can display it.
+    if evt.get("fx_rate"):
+        global _fx
+        _fx = {"rate": evt["fx_rate"], "source": evt.get("fx_source"),
+               "as_of": evt.get("fx_as_of"), "base": "USD", "quote": "GHS"}
+
     model = await get_model()
     # 1) TEST: predict with the current model BEFORE learning (honest live metric).
     p_before = model.predict_proba(vec)
     pred_label = 1 if p_before >= 0.5 else 0
     influence = model.influence()
+    # Explainable AI: for a linear model the contribution of each feature to this
+    # prediction is exactly weight_i * value_i. Surface the top drivers (computed
+    # with the PRE-update weights that produced p_before).
+    contribs = model.w * vec
+    order = np.argsort(-np.abs(contribs))
+    why = [{"feature": FEATURE_NAMES[i], "contribution": round(float(contribs[i]), 4)}
+           for i in order[:3] if abs(contribs[i]) > 1e-6]
     # 2) TRAIN: one online SGD step.
     loss = await model.learn(vec, label)
 
@@ -145,11 +239,51 @@ async def _process(evt: dict) -> bool:
         "pepper_fp": pepper_fingerprint(),
     })
 
+    if txn_id:
+        await _mark_seen(txn_id)   # this transaction is now exposed to the model
+
     _stats["learned"] += 1
     _stats["since_persist"] += 1
     if _stats["since_persist"] >= PERSIST_EVERY:
         await persist_model()
         _stats["since_persist"] = 0
+
+    # Non-PII transaction attributes for the live "stream of data" view. Present
+    # on dataset events; for feedback/review events, enrich from the txn record.
+    amount = evt.get("amount")
+    category = evt.get("merchant_category")
+    location = evt.get("location")
+    currency = evt.get("currency", "GHS")
+    if amount is None and evt.get("transaction_id"):
+        try:
+            from app.database import get_transaction_by_id
+            t = await get_transaction_by_id(evt["transaction_id"])
+            if t:
+                amount, category, location = t.amount, t.merchant_category, t.location
+                currency = t.currency or "GHS"
+        except Exception:
+            pass
+
+    # Live feed: push a compact, already-anonymized record to SSE subscribers.
+    _live_window.append(1 if pred_label == label else 0)
+    rolling_acc = sum(_live_window) / len(_live_window) if _live_window else None
+    _broadcast({
+        "type": "step",
+        "n": _stats["learned"],
+        "source": evt.get("source", "unknown"),
+        "subject": evt.get("subject"),
+        "amount": amount,
+        "currency": currency,
+        "merchant_category": category,
+        "location": location,
+        "label": label,
+        "predicted_proba": round(p_before, 4),
+        "predicted_label": pred_label,
+        "correct": pred_label == label,
+        "influence": influence,
+        "why": why,
+        "rolling_accuracy": round(rolling_acc, 4) if rolling_acc is not None else None,
+    })
     return True
 
 
@@ -167,10 +301,14 @@ async def _consume_loop() -> None:
     while not _stop.is_set():
         try:
             if _using_redis and _redis is not None:
+                # Standard online learning: pull ONE transaction at a time, learn
+                # from it, then fetch the next. When the stream is empty the read
+                # blocks (idle) and simply retries — the model resumes the moment
+                # another transaction arrives.
                 resp = await _redis.xreadgroup(GROUP, CONSUMER, {STREAM: ">"},
-                                               count=50, block=1000)
+                                               count=1, block=2000)
                 if not resp:
-                    continue
+                    continue  # no more data right now — wait for the next transaction
                 for _stream, messages in resp:
                     for msg_id, fields in messages:
                         _stats["consumed"] += 1
@@ -208,6 +346,7 @@ async def _consume_loop() -> None:
 async def start_consumer() -> None:
     global _consumer_task
     await _connect_redis()
+    await _seed_seen()   # so previously-learned data is never re-trained
     _stop.clear()
     _consumer_task = asyncio.create_task(_consume_loop())
 
@@ -251,6 +390,7 @@ async def status() -> dict:
         "stream": STREAM,
         "consumer_running": _consumer_task is not None and not _consumer_task.done(),
         "pepper_fingerprint": pepper_fingerprint(),
+        "fx": _fx,
         **_stats,
     }
     if _using_redis and _redis is not None:

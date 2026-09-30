@@ -10,9 +10,12 @@ Observability + ingestion for the online-learning pipeline.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import learning_stream
@@ -48,7 +51,8 @@ async def learning_metrics(window: int = 500, buckets: int = 20):
     curve = await get_learning_curve(buckets=buckets)
     sources = await count_by_source()
     model = await get_model()
-    return {"metrics": metrics, "curve": curve, "by_source": sources, "model": model.stats()}
+    return {"metrics": metrics, "curve": curve, "by_source": sources,
+            "model": model.stats(), "fx": learning_stream.get_fx()}
 
 
 @router.get("/events", summary="Recent anonymized learning steps")
@@ -59,3 +63,31 @@ async def learning_events(limit: int = 25):
 @router.get("/status", summary="Learning stream broker + consumer health")
 async def learning_status():
     return await learning_stream.status()
+
+
+@router.get("/live", summary="Real-time SSE stream of training steps as they happen")
+async def learning_live():
+    """Server-Sent Events feed. Each learning step (already anonymized) is pushed
+    as it is consumed, so the UI can render the flow of training in real time.
+    """
+    q = learning_stream.subscribe()
+
+    async def event_gen():
+        try:
+            # Greeting so the client knows the stream is open.
+            hello = await learning_stream.status()
+            yield f"data: {json.dumps({'type': 'hello', **hello})}\n\n"
+            while True:
+                try:
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(rec)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"   # comment frame keeps the connection warm
+        finally:
+            learning_stream.unsubscribe(q)
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })

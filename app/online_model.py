@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -63,6 +64,10 @@ N_FEATURES = len(FEATURE_NAMES)
 # ─── Hyper-parameters ─────────────────────────────────────────────────────────
 LEARNING_RATE = 0.08
 L2 = 1e-4
+# Fraud is highly imbalanced (often <1% of transactions). Without correction an
+# online model just learns to predict "legit" always. We up-weight the gradient
+# of positive (fraud) examples so the minority class actually moves the boundary.
+POS_WEIGHT = float(os.getenv("FRAUD_POS_WEIGHT", "15"))
 # The model must observe at least this many labels before it influences scoring.
 MIN_SAMPLES_TO_TRUST = 20
 # Its maximum share of the blended score, reached gradually as more labels arrive.
@@ -165,8 +170,9 @@ class OnlineFraudModel:
     def _step(self, vec: np.ndarray, label: int) -> float:
         p = self.predict_proba(vec)
         error = p - label                      # gradient of log-loss wrt logit
-        self.w -= LEARNING_RATE * (error * vec + L2 * self.w)
-        self.b -= LEARNING_RATE * error
+        sw = POS_WEIGHT if label == 1 else 1.0  # up-weight rare fraud examples
+        self.w -= LEARNING_RATE * (sw * error * vec + L2 * self.w)
+        self.b -= LEARNING_RATE * sw * error
         self.n_updates += 1
         if label == 1:
             self.n_pos += 1
