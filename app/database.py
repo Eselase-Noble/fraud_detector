@@ -86,6 +86,41 @@ async def _create_tables() -> None:
                 FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
             );
 
+            -- Feature vector captured at scoring time so the online model can be
+            -- trained later (on analyst feedback) against the exact same inputs.
+            ALTER TABLE fraud_results ADD COLUMN IF NOT EXISTS features JSONB;
+
+            -- Durable weights for the online-learning model. One row per model.
+            CREATE TABLE IF NOT EXISTS model_state (
+                name        TEXT PRIMARY KEY,
+                state       JSONB NOT NULL,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            -- Append-only log of every online-learning step. This is how the
+            -- learning is *tracked*: each row stores the model's PRE-update
+            -- prediction vs. the true label (prequential / test-then-train),
+            -- so rolling accuracy/precision/recall can be computed over time.
+            -- It holds ONLY pseudonymous subject tokens — no raw PII.
+            CREATE TABLE IF NOT EXISTS training_events (
+                id               BIGSERIAL PRIMARY KEY,
+                event_time       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                occurred_at      TIMESTAMPTZ,
+                source           TEXT NOT NULL,
+                subject_hash     TEXT,
+                transaction_id   TEXT,
+                label            SMALLINT NOT NULL,
+                predicted_proba  DOUBLE PRECISION,
+                predicted_label  SMALLINT,
+                correct          BOOLEAN,
+                loss             DOUBLE PRECISION,
+                influence        DOUBLE PRECISION,
+                model_version    TEXT,
+                pepper_fp        TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_train_evt_time ON training_events(event_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_train_evt_src  ON training_events(source);
+
             CREATE TABLE IF NOT EXISTS users (
                 user_id     TEXT PRIMARY KEY,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -470,14 +505,15 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
             await conn.execute(
                 """
                 INSERT INTO fraud_results (
-                    transaction_id, score, decision, reason, signals, processed_at
+                    transaction_id, score, decision, reason, signals, features, processed_at
                 )
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
                 ON CONFLICT (transaction_id) DO UPDATE SET
                     score        = EXCLUDED.score,
                     decision     = EXCLUDED.decision,
                     reason       = EXCLUDED.reason,
                     signals      = EXCLUDED.signals,
+                    features     = EXCLUDED.features,
                     processed_at = EXCLUDED.processed_at
                 """,
                 result.transaction_id,
@@ -485,6 +521,7 @@ async def save_fraud_result(result: FraudResult, txn: Optional[Transaction] = No
                 result.decision,
                 result.reason,
                 json.dumps(result.signals),
+                json.dumps(result.features) if result.features else None,
                 result.processed_at,
             )
 
@@ -607,6 +644,183 @@ async def load_csv_transactions(
 
     count = await save_bulk_csv_to_db(os.path.basename(csv_file), content)
     print(f"Loaded {count} transactions from {csv_file}.")
+
+
+# ─── Online-Learning Model State & Feedback ───────────────────────────────────
+
+async def load_model_state(name: str) -> Optional[dict]:
+    """Return the persisted weights/state for an online model, or None."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        raw = await conn.fetchval("SELECT state FROM model_state WHERE name = $1", name)
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return raw
+
+
+async def save_model_state(name: str, state: dict) -> None:
+    """Persist (upsert) the online model's weights/state."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO model_state (name, state, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (name) DO UPDATE SET
+                state = EXCLUDED.state,
+                updated_at = NOW()
+            """,
+            name, json.dumps(state),
+        )
+
+
+async def insert_training_event(evt: dict) -> None:
+    """Record one online-learning step for tracking/observability."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO training_events (
+                occurred_at, source, subject_hash, transaction_id, label,
+                predicted_proba, predicted_label, correct, loss, influence,
+                model_version, pepper_fp
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            """,
+            evt.get("occurred_at"), evt["source"], evt.get("subject_hash"),
+            evt.get("transaction_id"), evt["label"], evt.get("predicted_proba"),
+            evt.get("predicted_label"), evt.get("correct"), evt.get("loss"),
+            evt.get("influence"), evt.get("model_version"), evt.get("pepper_fp"),
+        )
+
+
+async def get_learning_metrics(window: int = 500) -> dict:
+    """Prequential metrics over the most recent `window` learning events.
+
+    Because each row holds the pre-update prediction, this is an honest
+    test-then-train estimate of live model quality (no train/test leakage).
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM training_events")
+        row = await conn.fetchrow(
+            """
+            WITH recent AS (
+                SELECT * FROM training_events ORDER BY id DESC LIMIT $1
+            )
+            SELECT
+                COUNT(*)                                                   AS n,
+                AVG(CASE WHEN correct THEN 1.0 ELSE 0.0 END)               AS accuracy,
+                COUNT(*) FILTER (WHERE label = 1)                          AS actual_pos,
+                COUNT(*) FILTER (WHERE predicted_label = 1)                AS pred_pos,
+                COUNT(*) FILTER (WHERE label = 1 AND predicted_label = 1)  AS tp,
+                COUNT(*) FILTER (WHERE label = 0 AND predicted_label = 1)  AS fp,
+                COUNT(*) FILTER (WHERE label = 1 AND predicted_label = 0)  AS fn,
+                AVG(loss)                                                  AS avg_loss
+            FROM recent
+            """,
+            window,
+        )
+    tp, fp, fn = (row["tp"] or 0), (row["fp"] or 0), (row["fn"] or 0)
+    precision = tp / (tp + fp) if (tp + fp) else None
+    recall = tp / (tp + fn) if (tp + fn) else None
+    f1 = (2 * precision * recall / (precision + recall)
+          if precision and recall else None)
+    return {
+        "total_events": total or 0,
+        "window": window,
+        "window_count": row["n"] or 0,
+        "accuracy": round(row["accuracy"], 4) if row["accuracy"] is not None else None,
+        "precision": round(precision, 4) if precision is not None else None,
+        "recall": round(recall, 4) if recall is not None else None,
+        "f1": round(f1, 4) if f1 is not None else None,
+        "avg_loss": round(row["avg_loss"], 4) if row["avg_loss"] is not None else None,
+        "fraud_labels": row["actual_pos"] or 0,
+    }
+
+
+async def get_learning_curve(buckets: int = 20, window: int = 2000) -> list[dict]:
+    """Rolling accuracy across `buckets` chunks of the recent event stream.
+
+    Returns oldest→newest so the frontend can draw a learning curve.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            WITH recent AS (
+                SELECT id, correct, label, predicted_label
+                FROM training_events ORDER BY id DESC LIMIT $2
+            ), numbered AS (
+                SELECT *, ntile($1) OVER (ORDER BY id) AS bucket FROM recent
+            )
+            SELECT bucket,
+                   COUNT(*)                                       AS n,
+                   AVG(CASE WHEN correct THEN 1.0 ELSE 0.0 END)   AS accuracy,
+                   MIN(id)                                        AS from_id
+            FROM numbered GROUP BY bucket ORDER BY bucket
+            """,
+            buckets, window,
+        )
+    return [{"bucket": r["bucket"], "n": r["n"],
+             "accuracy": round(r["accuracy"], 4) if r["accuracy"] is not None else None}
+            for r in rows]
+
+
+async def get_recent_training_events(limit: int = 25) -> list[dict]:
+    """Most recent learning steps (already anonymized — safe to display)."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT event_time, source, subject_hash, transaction_id, label,
+                   predicted_proba, predicted_label, correct, influence, model_version
+            FROM training_events ORDER BY id DESC LIMIT $1
+            """,
+            limit,
+        )
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("predicted_proba") is not None:
+            d["predicted_proba"] = round(float(d["predicted_proba"]), 4)
+        out.append(d)
+    return out
+
+
+async def count_by_source() -> list[dict]:
+    """How many learning events each source has contributed."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT source, COUNT(*) AS n FROM training_events GROUP BY source ORDER BY n DESC"
+        )
+    return [{"source": r["source"], "count": r["n"]} for r in rows]
+
+
+async def get_result_features(transaction_id: str) -> Optional[list]:
+    """Fetch the feature vector captured when a transaction was scored.
+
+    Needed to train the online model on analyst feedback against the exact
+    inputs the model saw at decision time.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        raw = await conn.fetchval(
+            "SELECT features FROM fraud_results WHERE transaction_id = $1", transaction_id
+        )
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return raw
 
 
 # ─── Row Mapper ───────────────────────────────────────────────────────────────

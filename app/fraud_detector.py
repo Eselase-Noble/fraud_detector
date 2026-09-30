@@ -21,6 +21,7 @@ from app.models import Transaction, FraudResult
 from app.vector_store import load_vector_store
 from app.external import load_risk_data
 from app.utils import to_utc, utc_now
+from app.online_model import build_features, get_model
 
 load_dotenv()
 
@@ -83,17 +84,25 @@ def _hours_between(a: datetime, b: datetime) -> float:
     return abs((to_utc(a) - to_utc(b)).total_seconds()) / 3600
 
 
-def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float]:
+def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float, dict]:
+    """Returns (signals, score_delta, feature_primitives).
+
+    The feature_primitives dict exposes the raw counts/flags so the online model
+    can be trained on the same inputs the rule engine used — no re-derivation.
+    """
     signals: list[str] = []
     delta = 0.0
+    prim = {"velocity_1h": 0, "velocity_24h": 0, "amount_spike": False}
     if not history:
-        return signals, delta
+        return signals, delta, prim
     now = txn.timestamp or utc_now()
     recent_1h = [h for h in history if _hours_between(now, h.timestamp) <= 1]
+    prim["velocity_1h"] = len(recent_1h)
     if len(recent_1h) >= 5:
         signals.append(f"High velocity: {len(recent_1h)} transactions in last hour")
         delta += 0.25
     recent_24h = [h for h in history if _hours_between(now, h.timestamp) <= 24]
+    prim["velocity_24h"] = len(recent_24h)
     if len(recent_24h) >= 20:
         signals.append(f"Very high daily volume: {len(recent_24h)} transactions in 24h")
         delta += 0.15
@@ -102,19 +111,22 @@ def _velocity_signals(txn: Transaction, history: list[Transaction]) -> tuple[lis
         if txn.amount > avg_amount * 3:
             signals.append(f"Amount spike: {txn.amount:.2f} vs avg {avg_amount:.2f}")
             delta += 0.2
-    return signals, delta
+            prim["amount_spike"] = True
+    return signals, delta, prim
 
 
-def _device_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float]:
+def _device_signals(txn: Transaction, history: list[Transaction]) -> tuple[list[str], float, bool]:
     signals: list[str] = []
     delta = 0.0
+    new_device = False
     if not history or not txn.device_id:
-        return signals, delta
+        return signals, delta, new_device
     known_devices = {h.device_id for h in history if h.device_id}
     if txn.device_id not in known_devices:
         signals.append("New/unrecognized device")
         delta += 0.15
-    return signals, delta
+        new_device = True
+    return signals, delta, new_device
 
 
 async def _fetch_online_intelligence(txn: Transaction) -> str:
@@ -149,9 +161,12 @@ async def detect_fraud(txn: Transaction, history: list[Transaction]) -> FraudRes
         signals.append(f"Elevated amount: ${txn.amount:,.2f}")
         score += 0.05
 
+    location_change = False
+    impossible_travel = False
     if history:
         last_location = history[0].location
         if txn.location and last_location and txn.location != last_location:
+            location_change = True
             signals.append(f"Location change: {last_location} -> {txn.location}")
             score += 0.2
             if history[0].timestamp:
@@ -159,33 +174,74 @@ async def detect_fraud(txn: Transaction, history: list[Transaction]) -> FraudRes
                     txn.timestamp or utc_now(), history[0].timestamp
                 )
                 if hours < 2:
+                    impossible_travel = True
                     signals.append("Impossible travel: location changed within 2 hours")
                     score += 0.25
 
-    v_signals, v_delta = _velocity_signals(txn, history)
+    v_signals, v_delta, v_prim = _velocity_signals(txn, history)
     signals.extend(v_signals)
     score += v_delta
 
-    d_signals, d_delta = _device_signals(txn, history)
+    d_signals, d_delta, new_device = _device_signals(txn, history)
     signals.extend(d_signals)
     score += d_delta
 
+    jurisdiction_risk = ""
     for r in risks:
         if r.get("country") == txn.location:
             level = r.get("risk_level", "")
             if level == "high":
+                jurisdiction_risk = "high"
                 signals.append(f"High-risk jurisdiction: {txn.location}")
                 score += 0.3
             elif level == "medium":
+                jurisdiction_risk = "medium"
                 signals.append(f"Medium-risk jurisdiction: {txn.location}")
                 score += 0.1
 
     HIGH_RISK_CATEGORIES = {"crypto", "gambling", "wire_transfer", "gift_cards", "forex"}
-    if txn.merchant_category and txn.merchant_category.lower() in HIGH_RISK_CATEGORIES:
+    high_risk_category = bool(
+        txn.merchant_category and txn.merchant_category.lower() in HIGH_RISK_CATEGORIES
+    )
+    if high_risk_category:
         signals.append(f"High-risk merchant category: {txn.merchant_category}")
         score += 0.2
 
-    score = round(min(score, 1.0), 4)
+    rule_score = round(min(score, 1.0), 4)
+
+    # ── Online-learning model ────────────────────────────────────────────────
+    # Build the feature vector from the very signals the rule engine just used,
+    # then let the incrementally-trained model adjust the score. The model stays
+    # out of the way (zero influence) until it has seen enough analyst feedback.
+    ts = txn.timestamp or utc_now()
+    feature_vec = build_features(
+        amount=txn.amount,
+        velocity_1h=v_prim["velocity_1h"],
+        velocity_24h=v_prim["velocity_24h"],
+        amount_spike=v_prim["amount_spike"],
+        location_change=location_change,
+        impossible_travel=impossible_travel,
+        new_device=new_device,
+        high_risk_category=high_risk_category,
+        jurisdiction_risk=jurisdiction_risk,
+        risk_tier=risk_tier,
+        hour=to_utc(ts).hour,
+    )
+    model_score = None
+    score = rule_score
+    try:
+        model = await get_model()
+        blended, model_prob, alpha = model.blend(rule_score, feature_vec)
+        model_score = round(model_prob, 4)
+        score = round(blended, 4)
+        if alpha > 0:
+            signals.append(
+                f"Model-adjusted score: rules {rule_score:.2f} -> {score:.2f} "
+                f"(model p={model_prob:.2f}, influence {alpha:.0%})"
+            )
+    except Exception as e:  # pragma: no cover — never let learning break scoring
+        logger.warning("Online model scoring skipped: %s", e)
+
     decision = "BLOCK" if score > 0.75 else "REVIEW" if score > 0.4 else "ALLOW"
 
     online_intel_task = asyncio.create_task(_fetch_online_intelligence(txn))
@@ -228,4 +284,6 @@ Focus on what a fraud analyst needs to act on this case.
         decision=decision,
         reason=reason,
         signals=signals,
+        model_score=model_score,
+        features=feature_vec.tolist(),
     )

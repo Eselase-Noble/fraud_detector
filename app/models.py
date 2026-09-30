@@ -37,9 +37,23 @@ class FraudResult(BaseModel):
     decision: str = Field(..., pattern="^(ALLOW|REVIEW|BLOCK)$")
     reason: str
     signals: List[str] = Field(default_factory=list)
+    model_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Raw probability from the online-learning model (before blending).",
+    )
+    features: List[float] = Field(
+        default_factory=list,
+        description="Feature vector captured at scoring time, used to train the online model on feedback.",
+    )
     processed_at: datetime = Field(default_factory=_now)
 
     model_config = {"json_encoders": {datetime: lambda v: v.isoformat()}}
+
+
+class FeedbackRequest(BaseModel):
+    """A labelled outcome for a scored transaction, used for online learning."""
+    is_fraud: bool = Field(..., description="True if the transaction was truly fraudulent.")
+    source: Optional[str] = Field(default="analyst", description="Who/what supplied the label.")
 
 
 class BatchTransaction(BaseModel):

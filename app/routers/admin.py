@@ -291,12 +291,36 @@ async def review_transaction(transaction_id: str, body: ReviewAction):
                 body.new_decision, transaction_id,
             )
 
+    # ── Online learning ──────────────────────────────────────────────────────
+    # A confirmed/cleared case is a ground-truth label. Publish it to the
+    # learning stream (identity pseudonymized at the boundary); the background
+    # consumer trains the model and tracks the step. Only CONFIRM_FRAUD / CLEAR
+    # are unambiguous labels — ESCALATE / NOTE are not, so they don't train.
+    queued = False
+    label_map = {"CONFIRM_FRAUD": 1, "CLEAR": 0}
+    if body.action in label_map:
+        try:
+            from app import learning_stream
+            from app.database import get_transaction_by_id
+            txn = await get_transaction_by_id(transaction_id)
+            await learning_stream.publish({
+                "source": "analyst_review",
+                "transaction_id": transaction_id,
+                "subject": txn.user_id if txn else None,
+                "label": label_map[body.action],
+            })
+            queued = True
+        except Exception as e:  # never let training break the review flow
+            import logging
+            logging.getLogger(__name__).warning("Publishing label to learning stream failed: %s", e)
+
     return {
         "status": "recorded",
         "transaction_id": transaction_id,
         "action": body.action,
         "previous_decision": previous_decision,
         "new_decision": body.new_decision or previous_decision,
+        "label_queued_for_learning": queued,
     }
 
 

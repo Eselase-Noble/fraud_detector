@@ -1,14 +1,48 @@
 from typing import List, Optional
 import asyncio
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Header
-from app.models import Transaction, FraudResult, BatchTransaction, BatchFraudResult
+from app.models import (
+    Transaction, FraudResult, BatchTransaction, BatchFraudResult, FeedbackRequest,
+)
 from app.fraud_detector import detect_fraud
 from app.database import (
     get_user_history, get_transaction_by_id, save_fraud_result, get_all_transactions,
     resolve_integration_id_by_key,
 )
+from app.online_model import get_model
+from app import learning_stream
 
 router = APIRouter( tags=["Transactions"])
+
+
+# ─── Online-Learning Feedback & Model Inspection ─────────────────────────────
+
+@router.post("/{transaction_id}/feedback", summary="Submit a fraud/legit label to train the online model")
+async def submit_feedback(transaction_id: str, body: FeedbackRequest):
+    """Report the true outcome of a scored transaction.
+
+    The label is published to the learning stream (identity pseudonymized at the
+    boundary); the background consumer trains the model incrementally and tracks
+    the step. This keeps a single, ordered, observable learning path.
+    """
+    txn = await get_transaction_by_id(transaction_id)
+    if not txn:
+        raise HTTPException(status_code=404, detail=f"Transaction '{transaction_id}' not found.")
+    await learning_stream.publish({
+        "source": body.source or "feedback_api",
+        "transaction_id": transaction_id,
+        "subject": txn.user_id,
+        "label": 1 if body.is_fraud else 0,
+    })
+    return {"status": "queued", "transaction_id": transaction_id,
+            "label": "fraud" if body.is_fraud else "legit",
+            "note": "Label queued to the learning stream; the consumer will train the model."}
+
+
+@router.get("/model/stats", summary="Inspect what the online-learning model has learned")
+async def model_stats():
+    model = await get_model()
+    return model.stats()
 
 
 # ─── Single Transaction Detection ────────────────────────────────────────────
